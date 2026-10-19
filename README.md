@@ -1,59 +1,34 @@
 # Sicredi Faturas
 
-Aplicativo local para controle de faturas do cartão Sicredi.
+Aplicativo para controle de faturas do cartão Sicredi.
 
 ---
 
 ## Como usar
 
-### 1. Instale o Node.js
-Baixe em https://nodejs.org (versão 18 ou superior).
+Acesse **https://vicentepaulo.github.io/gerenciador-despesas/** no navegador (PC ou celular).
 
-### 2. Inicie o servidor
-Abra o terminal nesta pasta e rode:
-
-```
-node server.js
-```
-
-Você verá algo como:
-
-```
-✅  Servidor rodando!
-   PC:      http://localhost:3000
-   Celular: http://192.168.1.10:3000  (mesmo Wi-Fi)
-
-   Dados salvos em: dados/dados.json
-   Para parar: Ctrl+C
-```
-
-### 3. Abra no navegador
-- **PC:** http://localhost:3000  
-- **Celular / outro dispositivo (mesmo Wi-Fi):** use o IP mostrado no terminal
+Não precisa instalar nada. Também funciona abrindo o `index.html` direto no navegador.
 
 ---
 
 ## Estrutura de arquivos
 
 ```
-sicredi-app/
-├── server.js       ← servidor Node.js (inicie aqui)
+gerenciador-despesas/
 ├── index.html      ← interface do app
 ├── style.css       ← estilos
-├── app.js          ← lógica do app
-└── dados/
-    └── dados.json  ← seus dados (criado automaticamente)
+└── app.js          ← lógica do app
 ```
 
 ---
 
 ## Dados
 
-Tudo é salvo em `dados/dados.json` automaticamente a cada alteração.  
-Você pode fazer backup deste arquivo ou movê-lo entre máquinas.
+Tudo é salvo automaticamente no `localStorage` do navegador a cada alteração.
 
-**Fallback offline:** se o servidor não estiver rodando e você abrir o `index.html`
-direto no navegador, o app usará o `localStorage` do navegador como cache temporário.
+- Os dados ficam **só no navegador/aparelho** onde foram cadastrados — PC e celular não compartilham dados.
+- Limpar os dados de navegação do site apaga as informações. Faça backups com as opções de exportar abaixo.
 
 ---
 

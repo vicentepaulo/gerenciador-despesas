@@ -63,66 +63,36 @@ let entSort     = { col: null, dir: null };
 let futSort     = { col: null, dir: null };
 let sdSort      = { col: null, dir: null };
 
-// ---------- PERSISTENCE (API) ----------
-// Salva em dados/dados.json via server.js
-// Se o servidor não estiver rodando, cai para localStorage como fallback.
+// ---------- PERSISTENCE (localStorage) ----------
+// Todos os dados ficam salvos no localStorage do navegador.
 
+const STORAGE_KEY = 'sicredi_dados';
 let _saveTimer = null;
 
-async function saveAll() {
+function saveAll() {
   const payload = { allTx, faturas, statusOverride, entradas, entradasFuturas, saidas, theme };
   // debounce: espera 400ms de silêncio antes de salvar
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async () => {
-    try {
-      const res = await fetch('/api/dados', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      // limpa fallback se o servidor voltou
-      localStorage.removeItem('sicredi_fallback');
-    } catch (_) {
-      // fallback: salva no localStorage
-      try { localStorage.setItem('sicredi_fallback', JSON.stringify(payload)); } catch (__) {}
-    }
+  _saveTimer = setTimeout(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch (_) {}
   }, 400);
 }
 
-async function loadAll() {
-  showToast('Carregando dados…', 'info', 0);
+function loadAll() {
   try {
-    const res = await fetch('/api/dados');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    allTx           = data.allTx           || [];
-    faturas         = data.faturas         || [];
-    statusOverride  = data.statusOverride  || {};
-    entradas        = data.entradas        || [];
-    entradasFuturas = data.entradasFuturas || [];
-    saidas          = data.saidas          || [];
-    if (data.theme) applyTheme(data.theme, true);
-    hideToast();
-  } catch (_) {
-    // fallback localStorage
-    try {
-      const raw = localStorage.getItem('sicredi_fallback');
-      if (raw) {
-        const data = JSON.parse(raw);
-        allTx           = data.allTx           || [];
-        faturas         = data.faturas         || [];
-        statusOverride  = data.statusOverride  || {};
-        entradas        = data.entradas        || [];
-        entradasFuturas = data.entradasFuturas || [];
-        saidas          = data.saidas          || [];
-        if (data.theme) applyTheme(data.theme, true);
-        showToast('Servidor offline — dados do cache local carregados', 'warn', 4000);
-      } else {
-        hideToast();
-      }
-    } catch (__) { hideToast(); }
-  }
+    // 'sicredi_fallback' era a chave usada na versão com server.js
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('sicredi_fallback');
+    if (raw) {
+      const data = JSON.parse(raw);
+      allTx           = data.allTx           || [];
+      faturas         = data.faturas         || [];
+      statusOverride  = data.statusOverride  || {};
+      entradas        = data.entradas        || [];
+      entradasFuturas = data.entradasFuturas || [];
+      saidas          = data.saidas          || [];
+      if (data.theme) applyTheme(data.theme, true);
+    }
+  } catch (_) {}
   afterLoad();
 }
 
@@ -216,7 +186,7 @@ function parseCurrencyInput(str) {
 // ---------- THEME ----------
 
 // Aplica o tema na tela (e opcionalmente atualiza o estado sem re-salvar,
-// usado quando o tema vem do servidor durante o carregamento).
+// usado quando o tema vem dos dados salvos durante o carregamento).
 function applyTheme(t, fromLoad) {
   theme = t === 'dark' ? 'dark' : 'light';
   document.body.classList.toggle('dark', theme === 'dark');
@@ -228,14 +198,14 @@ function applyTheme(t, fromLoad) {
   if (fromLoad) return; // não reagenda salvamento durante o carregamento inicial
 }
 
-// Chamado pelos botões Claro/Escuro — aplica e persiste (localStorage + servidor).
+// Chamado pelos botões Claro/Escuro — aplica e persiste no localStorage.
 function setTheme(t) {
   applyTheme(t);
   saveAll();
 }
 
-// Aplica o tema salvo assim que o script roda, antes mesmo do fetch ao
-// servidor terminar, para não haver um "flash" do tema errado ao recarregar.
+// Aplica o tema salvo assim que o script roda, antes de carregar os dados,
+// para não haver um "flash" do tema errado ao recarregar.
 (function initTheme() {
   let saved = 'light';
   try { saved = localStorage.getItem('sicredi_theme') || 'light'; } catch (_) {}
@@ -1299,4 +1269,4 @@ function importSaidasJSON(event) {
 
 // ---------- INIT ----------
 
-loadAll(); // async — carrega dados do servidor e depois renderiza
+loadAll(); // carrega dados do localStorage e depois renderiza
