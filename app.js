@@ -1,0 +1,1302 @@
+/* =============================================
+   SICREDI FATURAS — app.js
+   ============================================= */
+
+// ---------- CONSTANTS ----------
+
+const IGNORE_PATTERNS = [
+  /pag\s*fat/i,
+  /pagamento\s*fatura/i,
+  /pag\s*deb\s*cc/i,
+];
+
+function isPagFatura(desc) {
+  return IGNORE_PATTERNS.some(p => p.test(desc));
+}
+
+const TIPO_LABELS = {
+  salario:          'Salário',
+  vale_alimentacao: 'Vale alimentação',
+  vale_refeicao:    'Vale refeição',
+  freelance:        'Freelance',
+  bonus:            'Bônus',
+  aluguel:          'Aluguel recebido',
+  investimento:     'Rendimento investimento',
+  outros:           'Outros',
+};
+
+const SAIDA_LABELS = {
+  moradia:            'Moradia / Aluguel',
+  contas:             'Contas (água, luz, internet)',
+  mercado:            'Mercado',
+  transporte:         'Transporte',
+  saude:              'Saúde',
+  educacao:           'Educação',
+  lazer:              'Lazer',
+  pix_transferencia:  'Pix / Transferência',
+  outros:             'Outros',
+};
+
+// Agrupamento usado nas métricas de Saídas (fixas vs. variáveis, como um app de despesas comum)
+const SAIDA_FIXAS     = ['moradia', 'contas', 'educacao'];
+const SAIDA_VARIAVEIS = ['mercado', 'transporte', 'saude', 'lazer'];
+
+const MES_LABELS = [
+  'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'
+];
+
+// ---------- STATE ----------
+
+let allTx          = [];
+let faturas        = [];
+let pending        = null;
+let statusOverride = {};
+let entradas       = [];
+let entradasFuturas = [];
+let saidas          = [];
+let theme           = 'light';
+
+let txSort      = { col: null, dir: null };
+let installSort = { col: null, dir: null };
+let entSort     = { col: null, dir: null };
+let futSort     = { col: null, dir: null };
+let sdSort      = { col: null, dir: null };
+
+// ---------- PERSISTENCE (API) ----------
+// Salva em dados/dados.json via server.js
+// Se o servidor não estiver rodando, cai para localStorage como fallback.
+
+let _saveTimer = null;
+
+async function saveAll() {
+  const payload = { allTx, faturas, statusOverride, entradas, entradasFuturas, saidas, theme };
+  // debounce: espera 400ms de silêncio antes de salvar
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/dados', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      // limpa fallback se o servidor voltou
+      localStorage.removeItem('sicredi_fallback');
+    } catch (_) {
+      // fallback: salva no localStorage
+      try { localStorage.setItem('sicredi_fallback', JSON.stringify(payload)); } catch (__) {}
+    }
+  }, 400);
+}
+
+async function loadAll() {
+  showToast('Carregando dados…', 'info', 0);
+  try {
+    const res = await fetch('/api/dados');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    allTx           = data.allTx           || [];
+    faturas         = data.faturas         || [];
+    statusOverride  = data.statusOverride  || {};
+    entradas        = data.entradas        || [];
+    entradasFuturas = data.entradasFuturas || [];
+    saidas          = data.saidas          || [];
+    if (data.theme) applyTheme(data.theme, true);
+    hideToast();
+  } catch (_) {
+    // fallback localStorage
+    try {
+      const raw = localStorage.getItem('sicredi_fallback');
+      if (raw) {
+        const data = JSON.parse(raw);
+        allTx           = data.allTx           || [];
+        faturas         = data.faturas         || [];
+        statusOverride  = data.statusOverride  || {};
+        entradas        = data.entradas        || [];
+        entradasFuturas = data.entradasFuturas || [];
+        saidas          = data.saidas          || [];
+        if (data.theme) applyTheme(data.theme, true);
+        showToast('Servidor offline — dados do cache local carregados', 'warn', 4000);
+      } else {
+        hideToast();
+      }
+    } catch (__) { hideToast(); }
+  }
+  afterLoad();
+}
+
+function afterLoad() {
+  updateMetrics();
+  updateEnMetrics();
+  renderEnMensal();
+  renderEntradasFuturas();
+  updateSaidaMetrics();
+  renderSdMensal();
+  renderSaidas();
+  updateFaturaFilter();
+  const enDataInput = document.getElementById('en-data');
+  if (enDataInput) enDataInput.value = todayISO();
+  const futMesInput = document.getElementById('fut-mes');
+  if (futMesInput) futMesInput.value = todayISO().slice(0, 7);
+  const sdDataInput = document.getElementById('sd-data');
+  if (sdDataInput) sdDataInput.value = todayISO();
+}
+
+// ---------- TOAST ----------
+
+function showToast(msg, type, duration) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.className = 'toast toast-' + (type || 'info');
+  el.style.display = 'block';
+  if (duration > 0) setTimeout(hideToast, duration);
+}
+
+function hideToast() {
+  const el = document.getElementById('toast');
+  if (el) el.style.display = 'none';
+}
+
+// ---------- HELPERS ----------
+
+function fmtVal(v) {
+  const abs = Math.abs(v);
+  const str = abs.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (v < 0 ? '- ' : '') + 'R$\u00a0' + str;
+}
+
+function cycleDir(current) {
+  if (current === null)  return 'asc';
+  if (current === 'asc') return 'desc';
+  return null;
+}
+
+function sortData(list, col, dir, getter) {
+  if (!col || !dir) return list;
+  return [...list].sort((a, b) => {
+    const va = getter(a, col);
+    const vb = getter(b, col);
+    if (va === vb) return 0;
+    return (va < vb ? -1 : 1) * (dir === 'asc' ? 1 : -1);
+  });
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isoToBR(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function mesAnoLabel(mesAno) {
+  if (!mesAno) return '—';
+  const [y, m] = mesAno.split('-');
+  return `${MES_LABELS[parseInt(m) - 1]} ${y}`;
+}
+
+function maskCurrency(input) {
+  let v = input.value.replace(/\D/g, '');
+  v = (parseInt(v || '0') / 100).toFixed(2);
+  input.value = v.replace('.', ',');
+}
+
+function parseCurrencyInput(str) {
+  return parseFloat((str || '0').replace(/\./g, '').replace(',', '.')) || 0;
+}
+
+// ---------- THEME ----------
+
+// Aplica o tema na tela (e opcionalmente atualiza o estado sem re-salvar,
+// usado quando o tema vem do servidor durante o carregamento).
+function applyTheme(t, fromLoad) {
+  theme = t === 'dark' ? 'dark' : 'light';
+  document.body.classList.toggle('dark', theme === 'dark');
+  const btnLight = document.getElementById('btn-light');
+  const btnDark  = document.getElementById('btn-dark');
+  if (btnLight) btnLight.classList.toggle('on', theme === 'light');
+  if (btnDark)  btnDark.classList.toggle('on',  theme === 'dark');
+  try { localStorage.setItem('sicredi_theme', theme); } catch (_) {}
+  if (fromLoad) return; // não reagenda salvamento durante o carregamento inicial
+}
+
+// Chamado pelos botões Claro/Escuro — aplica e persiste (localStorage + servidor).
+function setTheme(t) {
+  applyTheme(t);
+  saveAll();
+}
+
+// Aplica o tema salvo assim que o script roda, antes mesmo do fetch ao
+// servidor terminar, para não haver um "flash" do tema errado ao recarregar.
+(function initTheme() {
+  let saved = 'light';
+  try { saved = localStorage.getItem('sicredi_theme') || 'light'; } catch (_) {}
+  applyTheme(saved, true);
+})();
+
+// ---------- TABS ----------
+
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+  // fechar menu mobile se aberto
+  document.getElementById('nav-menu').classList.remove('open');
+  if (name === 'entradas')      { renderEntradas(); renderEnMensal(); }
+  if (name === 'futuras')       renderEntradasFuturas();
+  if (name === 'saidas')        { renderSaidas(); renderSdMensal(); }
+  if (name === 'transacoes')    renderTx();
+  if (name === 'parcelamentos') renderInstall();
+  if (name === 'faturas')       renderFaturas();
+}
+
+function toggleMobileMenu() {
+  document.getElementById('nav-menu').classList.toggle('open');
+}
+
+// ---------- DRAG & DROP / FILE ----------
+
+function ev(e, on) {
+  e.preventDefault();
+  document.getElementById('dropzone').classList.toggle('dragover', on);
+}
+
+function drop(e) {
+  e.preventDefault();
+  document.getElementById('dropzone').classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f) readFile(f);
+}
+
+function handleFile(e) {
+  const f = e.target.files[0];
+  if (f) readFile(f);
+}
+
+function readFile(file) {
+  const rd = new FileReader();
+  rd.onload = e => parseCSV(e.target.result, file.name);
+  rd.readAsText(file, 'latin1');
+}
+
+// ---------- PARSE CSV ----------
+
+function parseCSV(raw, filename) {
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+  const logs  = [];
+  const meta  = {};
+  let dataStart = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.toLowerCase().includes('data') && l.toLowerCase().includes('descri')) {
+      dataStart = i;
+      break;
+    }
+    const parts = l.split(';').map(s => s.replace(/^[\s"']+|[\s"']+$/g, ''));
+    if (parts[0] && parts[1]) meta[parts[0].trim()] = parts[1].trim();
+  }
+
+  const vencStr  = meta[' Data de Vencimento'] || meta['Data de Vencimento'] || '';
+  const totalStr = meta[' Valor Total (R$)'] || meta['Valor Total (R$)']
+                || meta[' Valor Total']      || meta['Valor Total'] || '';
+  const situacao = meta[' Situação'] || meta['Situação'] || '';
+
+  logs.push({ t: 'info', m: `Associado: ${meta[' Associado'] || meta['Associado'] || '—'}` });
+  logs.push({ t: 'info', m: `Vencimento: ${vencStr} | Total: ${totalStr} | ${situacao}` });
+
+  if (dataStart < 0) {
+    logs.push({ t: 'warn', m: 'Cabeçalho de colunas não encontrado' });
+    return;
+  }
+
+  const header = lines[dataStart].split(';').map(s => s.replace(/^[\s"']+|[\s"']+$/g, '').trim());
+  logs.push({ t: 'ok', m: `Colunas: ${header.filter(Boolean).join(' · ')}` });
+
+  const ci         = n => header.findIndex(h => h.toLowerCase().includes(n.toLowerCase()));
+  const iData      = ci('data');
+  const iDesc      = ci('descri');
+  const iParcela   = ci('parcela');
+  const iValor     = ci('valor');
+  const iAdicional = ci('adicional');
+
+  const tx = [];
+  let ignored = 0;
+  const uidCount = {};
+
+  for (let i = dataStart + 1; i < lines.length; i++) {
+    const row = lines[i].split(';').map(s => s.replace(/^[\s"']+|[\s"']+$/g, '').trim());
+    if (!row[iData] || !row[iDesc]) continue;
+
+    const desc = row[iDesc].trim();
+    if (isPagFatura(desc)) { ignored++; continue; }
+
+    const parcelaRaw = iParcela >= 0 ? (row[iParcela] || '') : '';
+    const valorRaw   = (row[iValor] || '').replace('R$', '').replace(/\./g, '').replace(',', '.').trim();
+    const valor      = parseFloat(valorRaw) || 0;
+    const adicional  = iAdicional >= 0 ? (row[iAdicional] || '') : '';
+
+    let parcela = null;
+    const pm = parcelaRaw.match(/\((\d+)\/(\d+)\)/);
+    if (pm) parcela = { atual: parseInt(pm[1]), total: parseInt(pm[2]) };
+
+    const tipo = valor < 0 ? 'credito' : 'debito';
+
+    const baseUid = [row[iData], desc, parcelaRaw, filename].join('||');
+    uidCount[baseUid] = (uidCount[baseUid] || 0) + 1;
+    const uid = uidCount[baseUid] > 1 ? `${baseUid}||${uidCount[baseUid]}` : baseUid;
+
+    tx.push({ uid, data: row[iData], desc, parcela, valor, adicional, tipo, faturaId: filename });
+  }
+
+  logs.push({ t: 'ok', m: `${tx.length} transações lidas (${ignored} pagamentos de fatura ignorados)` });
+  logs.push({ t: 'ok', m: `Parcelamentos: ${tx.filter(t => t.parcela).length} | Créditos: ${tx.filter(t => t.tipo === 'credito').length}` });
+
+  pending = { tx, meta, vencStr, totalStr, situacao, filename, logs };
+  showPreview();
+}
+
+// ---------- PREVIEW ----------
+
+function showPreview() {
+  const p = pending;
+  document.getElementById('preview-block').style.display = 'block';
+  document.getElementById('preview-title').textContent =
+    `Pré-visualização: ${p.filename} (${p.tx.length} transações)`;
+
+  const assoc = p.meta[' Associado'] || p.meta['Associado'] || '—';
+  const conta = p.meta[' Conta Corrente'] || p.meta['Conta Corrente'] || '—';
+
+  document.getElementById('fatura-info').innerHTML = `
+    <div class="sec-title" style="margin-bottom:.5rem">Dados da fatura</div>
+    <div class="fatura-grid">
+      <div class="fatura-item">Associado<b>${assoc}</b></div>
+      <div class="fatura-item">Conta<b>${conta}</b></div>
+      <div class="fatura-item">Vencimento<b>${p.vencStr}</b></div>
+      <div class="fatura-item">Valor total<b style="color:var(--red)">${p.totalStr}</b></div>
+      <div class="fatura-item">Situação<b>${p.situacao}</b></div>
+    </div>`;
+
+  document.getElementById('preview-cols').innerHTML =
+    ['Data','Descrição','Parcela','Valor','Tipo','Adicional']
+      .map(c => `<span class="badge b-blue">${c}</span>`).join('');
+
+  document.getElementById('import-log').innerHTML =
+    p.logs.map(l => `<div class="log-${l.t}">${l.t==='ok'?'✓':l.t==='warn'?'⚠':'ℹ'} ${l.m}</div>`).join('');
+
+  document.getElementById('preview-body').innerHTML = p.tx.map(t => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${t.data}</td>
+      <td>${t.desc}</td>
+      <td>${t.parcela ? `<span class="badge b-amber">${t.parcela.atual}/${t.parcela.total}</span>` : '—'}</td>
+      <td style="font-weight:500;color:${t.valor<0?'var(--green)':'var(--red)'};white-space:nowrap">${fmtVal(t.valor)}</td>
+      <td><span class="badge ${t.tipo==='credito'?'b-green':'b-red'}">${t.tipo==='credito'?'Crédito':'Débito'}</span></td>
+      <td style="font-size:12px;color:var(--muted)">${t.adicional||'—'}</td>
+    </tr>`).join('');
+}
+
+function confirmImport() {
+  if (!pending) return;
+  const existing = new Set(allTx.map(t => t.uid));
+  const added    = pending.tx.filter(t => !existing.has(t.uid));
+  allTx = [...allTx, ...added];
+
+  if (!faturas.find(f => f.id === pending.filename)) {
+    const total = parseFloat(
+      (pending.totalStr || '0').replace('R$','').replace(/\./g,'').replace(',','.')
+    ) || 0;
+    faturas.push({
+      id: pending.filename, venc: pending.vencStr,
+      total, totalStr: pending.totalStr,
+      situacao: pending.situacao, count: pending.tx.length,
+    });
+  }
+
+  pending = null;
+  document.getElementById('preview-block').style.display = 'none';
+  document.getElementById('finput').value = '';
+
+  saveAll();
+  updateFaturaFilter();
+  updateMetrics();
+  updateEnMetrics();
+  updateSaidaMetrics();
+  showToast(`${added.length} transações importadas e salvas ✓`, 'ok', 3000);
+}
+
+function cancelImport() {
+  pending = null;
+  document.getElementById('preview-block').style.display = 'none';
+  document.getElementById('finput').value = '';
+}
+
+// ---------- TRANSACTIONS ----------
+
+function sortTxBy(col) {
+  if (txSort.col === col) {
+    txSort.dir = cycleDir(txSort.dir);
+    if (txSort.dir === null) txSort.col = null;
+  } else { txSort.col = col; txSort.dir = 'asc'; }
+  renderTx();
+}
+
+function txGetter(t, col) {
+  if (col === 'data')    return t.data;
+  if (col === 'desc')    return t.desc.toLowerCase();
+  if (col === 'parcela') return t.parcela ? t.parcela.atual : -1;
+  if (col === 'valor')   return Math.abs(t.valor);
+  if (col === 'tipo')    return t.tipo;
+  if (col === 'fatura')  return t.faturaId;
+  return '';
+}
+
+function thTx(col, label) {
+  const active = txSort.col === col;
+  const icon   = !active ? '↕' : txSort.dir === 'asc' ? '↑' : '↓';
+  return `<th style="cursor:pointer;user-select:none;${active?'color:var(--accent-text)':''}" onclick="sortTxBy('${col}')">${label} <span style="font-size:10px;opacity:${active?1:0.4}">${icon}</span></th>`;
+}
+
+function renderTx() {
+  const q  = (document.getElementById('search').value || '').toLowerCase();
+  const ft = document.getElementById('ftype').value;
+  const ff = document.getElementById('ffatura').value;
+
+  let list = allTx.filter(t => {
+    if (q  && !t.desc.toLowerCase().includes(q))   return false;
+    if (ft === 'parcelado' && !t.parcela)           return false;
+    if (ft && ft !== 'parcelado' && t.tipo !== ft)  return false;
+    if (ff && t.faturaId !== ff)                    return false;
+    return true;
+  });
+
+  list = txSort.col && txSort.dir
+    ? sortData(list, txSort.col, txSort.dir, txGetter)
+    : [...list].sort((a, b) => b.data.localeCompare(a.data));
+
+  document.getElementById('tx-head').innerHTML =
+    thTx('data','Data') + thTx('desc','Descrição') + thTx('parcela','Parcela') +
+    thTx('valor','Valor') + thTx('tipo','Tipo') + thTx('fatura','Fatura');
+
+  const body = document.getElementById('tx-body');
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+      <div class="empty-icon">${allTx.length?'🔍':'📄'}</div>
+      <div class="empty-title">${allTx.length?'Nenhum resultado':'Nenhuma transação importada'}</div>
+      <div class="empty-sub">${allTx.length?'Tente outros filtros':'Importe um CSV do Sicredi para começar'}</div>
+    </div></td></tr>`;
+    return;
+  }
+
+  body.innerHTML = list.map(t => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${t.data}</td>
+      <td>${t.desc}</td>
+      <td>${t.parcela?`<span class="badge b-amber">${t.parcela.atual}/${t.parcela.total}</span>`:'<span style="color:var(--hint)">—</span>'}</td>
+      <td style="font-weight:500;color:${t.valor<0?'var(--green)':'var(--red)'};white-space:nowrap">${fmtVal(t.valor)}</td>
+      <td><span class="badge ${t.tipo==='credito'?'b-green':'b-red'}">${t.tipo==='credito'?'Crédito':'Débito'}</span></td>
+      <td style="font-size:11px;color:var(--muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.faturaId.replace('.csv','')}</td>
+    </tr>`).join('');
+}
+
+// ---------- INSTALLMENTS ----------
+
+function buildInstallRows() {
+  return allTx.filter(t => t.parcela).map(t => {
+    const status = statusOverride[t.uid] !== undefined
+      ? statusOverride[t.uid]
+      : (t.parcela.atual >= t.parcela.total ? 'quitado' : 'aberto');
+    const restantes     = Math.max(0, t.parcela.total - t.parcela.atual);
+    const restanteTotal = status === 'quitado' ? 0 : restantes * Math.abs(t.valor);
+    return {
+      uid: t.uid, desc: t.desc, data: t.data, faturaId: t.faturaId,
+      atual: t.parcela.atual, total: t.parcela.total,
+      valor: Math.abs(t.valor), restanteTotal, status,
+    };
+  });
+}
+
+function toggleStatus(uid) {
+  const rows = buildInstallRows();
+  const row  = rows.find(r => r.uid === uid);
+  if (!row) return;
+  statusOverride[uid] = row.status === 'aberto' ? 'quitado' : 'aberto';
+  saveAll();
+  renderInstall();
+}
+
+function sortInstallBy(col) {
+  if (installSort.col === col) {
+    installSort.dir = cycleDir(installSort.dir);
+    if (installSort.dir === null) installSort.col = null;
+  } else { installSort.col = col; installSort.dir = 'asc'; }
+  renderInstall();
+}
+
+function installGetter(r, col) {
+  if (col === 'data')      return r.data;
+  if (col === 'desc')      return r.desc.toLowerCase();
+  if (col === 'parcela')   return r.atual;
+  if (col === 'progresso') return r.atual / r.total;
+  if (col === 'valor')     return r.valor;
+  if (col === 'restante')  return r.restanteTotal;
+  if (col === 'status')    return r.status;
+  return '';
+}
+
+function thInstall(col, label) {
+  const active = installSort.col === col;
+  const icon   = !active ? '↕' : installSort.dir === 'asc' ? '↑' : '↓';
+  return `<th style="cursor:pointer;user-select:none;${active?'color:var(--accent-text)':''}" onclick="sortInstallBy('${col}')">${label} <span style="font-size:10px;opacity:${active?1:0.4}">${icon}</span></th>`;
+}
+
+function renderInstall() {
+  const filterVal = document.getElementById('ip-filter').value;
+  const allRows   = buildInstallRows();
+  const abertos   = allRows.filter(r => r.status === 'aberto');
+  const quitados  = allRows.filter(r => r.status === 'quitado');
+
+  document.getElementById('ip-aberto').textContent   = abertos.length;
+  document.getElementById('ip-quitado').textContent  = quitados.length;
+  document.getElementById('ip-restante').textContent = fmtVal(abertos.reduce((s,r) => s+r.restanteTotal, 0));
+  document.getElementById('ip-mes').textContent      = fmtVal(abertos.reduce((s,r) => s+r.valor, 0));
+
+  let items = filterVal==='aberto' ? abertos : filterVal==='quitado' ? quitados : allRows;
+
+  items = installSort.col && installSort.dir
+    ? sortData(items, installSort.col, installSort.dir, installGetter)
+    : [...items].sort((a, b) => b.data.localeCompare(a.data));
+
+  document.getElementById('ip-head').innerHTML =
+    thInstall('data','Data') + thInstall('desc','Descrição') + thInstall('parcela','Parcela') +
+    thInstall('progresso','Progresso') + thInstall('valor','Valor') +
+    thInstall('restante','Restante') + thInstall('status','Status');
+
+  const body = document.getElementById('ip-body');
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="7"><div class="empty-state">
+      <div class="empty-icon">💳</div>
+      <div class="empty-title">Nenhum parcelamento${filterVal!=='todos'?' nessa categoria':''}</div>
+      <div class="empty-sub">Detectados automaticamente pelo campo Parcela</div>
+    </div></td></tr>`;
+    return;
+  }
+
+  body.innerHTML = items.map(r => {
+    const pct     = Math.round((r.atual / r.total) * 100);
+    const safeUid = r.uid.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<tr class="${r.status==='quitado'?'quitado':''}">
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${r.data}</td>
+      <td>${r.desc}</td>
+      <td><span class="badge b-amber">${r.atual}/${r.total}</span></td>
+      <td style="min-width:90px">
+        <div class="install-bar">
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+          <span style="font-size:11px;color:var(--muted);min-width:26px">${pct}%</span>
+        </div>
+      </td>
+      <td style="font-weight:500;color:var(--red);white-space:nowrap">${fmtVal(r.valor)}</td>
+      <td style="color:${r.status==='quitado'?'var(--muted)':'var(--red)'};white-space:nowrap">
+        ${r.status==='quitado'?'—':fmtVal(r.restanteTotal)}</td>
+      <td><button class="status-toggle ${r.status}" onclick="toggleStatus('${safeUid}')">
+        ${r.status==='quitado'?'✓ Quitado':'● Em aberto'}
+      </button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ---------- FATURAS HISTORY ----------
+
+function renderFaturas() {
+  const el = document.getElementById('faturas-list');
+  if (!faturas.length) {
+    el.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">🧾</div>
+      <div class="empty-title">Nenhuma fatura importada</div>
+      <div class="empty-sub">Importe seus CSVs para ver o histórico aqui</div>
+    </div>`;
+    return;
+  }
+  el.innerHTML = faturas.map(f => `
+    <div class="fatura-card">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.id.replace('.csv','')}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Venc: ${f.venc} · ${f.count} transações</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:15px;font-weight:500;color:var(--red)">${f.totalStr}</div>
+        <span class="badge b-gray" style="margin-top:4px">${f.situacao}</span>
+      </div>
+    </div>`).join('');
+}
+
+// ---------- METRICS ----------
+
+function updateMetrics() {
+  const debitos  = allTx.filter(t => t.tipo==='debito').reduce((s,t) => s+Math.abs(t.valor), 0);
+  const creditos = allTx.filter(t => t.tipo==='credito').reduce((s,t) => s+Math.abs(t.valor), 0);
+  document.getElementById('m-total').textContent    = fmtVal(debitos - creditos);
+  document.getElementById('m-debitos').textContent  = fmtVal(debitos);
+  document.getElementById('m-creditos').textContent = fmtVal(creditos);
+  document.getElementById('m-parcels').textContent  = allTx.filter(t => t.parcela).length;
+  document.getElementById('m-count').textContent    = allTx.length;
+}
+
+function updateFaturaFilter() {
+  const sel = document.getElementById('ffatura');
+  sel.innerHTML = '<option value="">Todas as faturas</option>' +
+    faturas.map(f => `<option value="${f.id}">${f.id.replace('.csv','')}</option>`).join('');
+}
+
+function exportCSV() {
+  if (!allTx.length) { showToast('Nenhuma transação para exportar','warn',3000); return; }
+  const rows = [
+    ['Data','Descrição','Parcela','Valor','Tipo','Adicional','Fatura'],
+    ...allTx.map(t => [
+      t.data, t.desc,
+      t.parcela ? `${t.parcela.atual}/${t.parcela.total}` : '',
+      t.valor.toFixed(2).replace('.',','),
+      t.tipo, t.adicional, t.faturaId,
+    ]),
+  ];
+  const blob = new Blob(['\uFEFF' + rows.map(r => r.join(';')).join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'faturas_sicredi.csv';
+  a.click();
+}
+
+// ---------- ENTRADAS ----------
+
+function addEntrada() {
+  const desc  = (document.getElementById('en-desc').value || '').trim();
+  const tipo  = document.getElementById('en-tipo').value;
+  const valor = parseCurrencyInput(document.getElementById('en-valor').value);
+  const data  = document.getElementById('en-data').value || todayISO();
+  const errEl = document.getElementById('en-error');
+
+  if (!desc)      { showEnError('Informe uma descrição.'); return; }
+  if (valor <= 0) { showEnError('Informe um valor maior que zero.'); return; }
+  errEl.style.display = 'none';
+
+  entradas.push({ id: Date.now(), desc, tipo, valor, data });
+  saveAll();
+  updateEnMetrics();
+  renderEntradas();
+  renderEnMensal();
+  updateSaidaMetrics();
+
+  document.getElementById('en-desc').value  = '';
+  document.getElementById('en-valor').value = '';
+  document.getElementById('en-data').value  = todayISO();
+  document.getElementById('en-desc').focus();
+  showToast('Entrada adicionada ✓', 'ok', 2000);
+}
+
+function showEnError(msg) {
+  const el = document.getElementById('en-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function deleteEntrada(id) {
+  if (!confirm('Excluir esta entrada?')) return;
+  entradas = entradas.filter(e => e.id !== id);
+  saveAll();
+  updateEnMetrics();
+  renderEntradas();
+  renderEnMensal();
+  updateSaidaMetrics();
+}
+
+// Saldo geral = total de entradas − total da fatura do cartão (débitos − créditos) − total de saídas.
+// Usado tanto na aba Entradas quanto na aba Saídas para manter os dois números sempre coerentes.
+function calcSaldoGeral(mesFiltro) {
+  const totalEntradas = (mesFiltro ? entradas.filter(e => e.data.slice(0,7) === mesFiltro) : entradas)
+    .reduce((s,e) => s+e.valor, 0);
+  const debitos  = allTx.filter(t => t.tipo==='debito').reduce((s,t) => s+Math.abs(t.valor), 0);
+  const creditos = allTx.filter(t => t.tipo==='credito').reduce((s,t) => s+Math.abs(t.valor), 0);
+  const totalSaidas = (mesFiltro ? saidas.filter(s => s.data.slice(0,7) === mesFiltro) : saidas)
+    .reduce((s,x) => s+x.valor, 0);
+  return totalEntradas - (debitos - creditos) - totalSaidas;
+}
+
+function updateEnMetrics() {
+  const mesFiltro = (document.getElementById('en-filter-mes') || {}).value || '';
+  const base = mesFiltro ? entradas.filter(e => e.data.slice(0,7) === mesFiltro) : entradas;
+
+  const total   = base.reduce((s,e) => s+e.valor, 0);
+  const salario = base.filter(e => e.tipo==='salario').reduce((s,e) => s+e.valor, 0);
+  const vale    = base.filter(e => ['vale_alimentacao','vale_refeicao'].includes(e.tipo)).reduce((s,e) => s+e.valor, 0);
+  const outros  = base.filter(e => !['salario','vale_alimentacao','vale_refeicao'].includes(e.tipo)).reduce((s,e) => s+e.valor, 0);
+
+  document.getElementById('en-total').textContent   = fmtVal(total);
+  document.getElementById('en-salario').textContent = fmtVal(salario);
+  document.getElementById('en-vale').textContent    = fmtVal(vale);
+  document.getElementById('en-outros').textContent  = fmtVal(outros);
+
+  const saldoEl = document.getElementById('en-saldo');
+  const saldo   = calcSaldoGeral(mesFiltro);
+  saldoEl.textContent = fmtVal(saldo);
+  saldoEl.className   = 'metric-value ' + (saldo >= 0 ? 'green' : 'red');
+}
+
+function renderEnMensal() {
+  const el = document.getElementById('en-mensal-body');
+  if (!el) return;
+
+  const map = {};
+  entradas.forEach(e => {
+    const k = e.data.slice(0,7);
+    if (!map[k]) map[k] = { mesAno: k, total: 0, salario: 0, vale: 0, outros: 0 };
+    map[k].total += e.valor;
+    if (e.tipo === 'salario') map[k].salario += e.valor;
+    else if (['vale_alimentacao','vale_refeicao'].includes(e.tipo)) map[k].vale += e.valor;
+    else map[k].outros += e.valor;
+  });
+
+  const rows = Object.values(map).sort((a,b) => b.mesAno.localeCompare(a.mesAno));
+
+  el.innerHTML = !rows.length
+    ? `<tr><td colspan="5" style="text-align:center;padding:1.25rem;color:var(--muted);font-size:13px">Nenhuma entrada cadastrada</td></tr>`
+    : rows.map(r => `
+      <tr style="cursor:pointer" onclick="filterEnByMes('${r.mesAno}')" title="Filtrar por ${mesAnoLabel(r.mesAno)}">
+        <td style="font-weight:500">${mesAnoLabel(r.mesAno)}</td>
+        <td style="color:var(--green);font-weight:500">${fmtVal(r.total)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.salario)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.vale)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.outros)}</td>
+      </tr>`).join('');
+
+  updateEnMesFilter(rows.map(r => r.mesAno));
+}
+
+function filterEnByMes(mesAno) {
+  const sel = document.getElementById('en-filter-mes');
+  if (!sel) return;
+  sel.value = sel.value === mesAno ? '' : mesAno;
+  updateEnMetrics();
+  renderEntradas();
+}
+
+function updateEnMesFilter(meses) {
+  const sel = document.getElementById('en-filter-mes');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Todos os meses</option>' +
+    meses.map(m => `<option value="${m}">${mesAnoLabel(m)}</option>`).join('');
+  if (current && meses.includes(current)) sel.value = current;
+}
+
+function sortEnBy(col) {
+  if (entSort.col === col) {
+    entSort.dir = cycleDir(entSort.dir);
+    if (entSort.dir === null) entSort.col = null;
+  } else { entSort.col = col; entSort.dir = 'asc'; }
+  renderEntradas();
+}
+
+function enGetter(e, col) {
+  if (col === 'data')  return e.data;
+  if (col === 'desc')  return e.desc.toLowerCase();
+  if (col === 'tipo')  return e.tipo;
+  if (col === 'valor') return e.valor;
+  return '';
+}
+
+function thEn(col, label) {
+  const active = entSort.col === col;
+  const icon   = !active ? '↕' : entSort.dir === 'asc' ? '↑' : '↓';
+  return `<th style="cursor:pointer;user-select:none;${active?'color:var(--accent-text);':''}" onclick="sortEnBy('${col}')">${label} <span style="font-size:10px;opacity:${active?1:0.4}">${icon}</span></th>`;
+}
+
+function renderEntradas() {
+  const q    = (document.getElementById('en-search').value || '').toLowerCase();
+  const tipo = document.getElementById('en-filter-tipo').value;
+  const mes  = (document.getElementById('en-filter-mes') || {}).value || '';
+
+  let list = entradas.filter(e => {
+    if (q    && !e.desc.toLowerCase().includes(q)) return false;
+    if (tipo && e.tipo !== tipo)                   return false;
+    if (mes  && e.data.slice(0,7) !== mes)         return false;
+    return true;
+  });
+
+  list = entSort.col && entSort.dir
+    ? sortData(list, entSort.col, entSort.dir, enGetter)
+    : [...list].sort((a,b) => b.data.localeCompare(a.data));
+
+  document.getElementById('en-head').innerHTML =
+    thEn('data','Data') + thEn('desc','Descrição') + thEn('tipo','Tipo') +
+    thEn('valor','Valor') + '<th style="width:44px"></th>';
+
+  const body = document.getElementById('en-body');
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">
+      <div class="empty-icon">${entradas.length?'🔍':'💰'}</div>
+      <div class="empty-title">${entradas.length?'Nenhum resultado':'Nenhuma entrada cadastrada'}</div>
+      <div class="empty-sub">${entradas.length?'Tente outros filtros':'Use o formulário acima para adicionar recebimentos'}</div>
+    </div></td></tr>`;
+    return;
+  }
+
+  body.innerHTML = list.map(e => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${isoToBR(e.data)}</td>
+      <td>${e.desc}</td>
+      <td><span class="badge b-tipo-${e.tipo}">${TIPO_LABELS[e.tipo]||e.tipo}</span></td>
+      <td style="font-weight:500;color:var(--green);white-space:nowrap">${fmtVal(e.valor)}</td>
+      <td style="text-align:center">
+        <button class="btn-delete" onclick="deleteEntrada(${e.id})" title="Excluir">✕</button>
+      </td>
+    </tr>`).join('');
+}
+
+function exportEntradasJSON() {
+  if (!entradas.length) { showToast('Nenhuma entrada para exportar','warn',3000); return; }
+  const blob = new Blob([JSON.stringify(entradas, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'entradas_sicredi.json';
+  a.click();
+}
+
+function importEntradasClick() {
+  document.getElementById('en-import-file').click();
+}
+
+function importEntradasJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) { showToast('JSON inválido — esperado um array','warn',4000); return; }
+      const existing = new Set(entradas.map(x => x.id));
+      let added = 0;
+      data.forEach(item => {
+        if (item.id && item.desc && item.tipo && item.valor) {
+          if (!existing.has(item.id)) { entradas.push(item); added++; }
+        }
+      });
+      saveAll();
+      updateEnMetrics();
+      renderEntradas();
+      renderEnMensal();
+      updateSaidaMetrics();
+      showToast(`${added} entrada(s) importada(s) ✓`, 'ok', 3000);
+    } catch (_) {
+      showToast('Erro ao ler o arquivo JSON', 'warn', 4000);
+    }
+  };
+  rd.readAsText(file);
+  event.target.value = '';
+}
+
+// ---------- ENTRADAS FUTURAS ----------
+// Mesma lógica da aba Entradas, porém por mês (sem dia específico) — usada
+// para planejar recebimentos que ainda vão acontecer (ex: R$ 300 em Novembro).
+
+function addEntradaFutura() {
+  const desc  = (document.getElementById('fut-desc').value || '').trim();
+  const tipo  = document.getElementById('fut-tipo').value;
+  const valor = parseCurrencyInput(document.getElementById('fut-valor').value);
+  const mes   = document.getElementById('fut-mes').value || todayISO().slice(0, 7);
+
+  if (!desc)      { showFutError('Informe uma descrição.'); return; }
+  if (valor <= 0) { showFutError('Informe um valor maior que zero.'); return; }
+  document.getElementById('fut-error').style.display = 'none';
+
+  entradasFuturas.push({ id: Date.now(), desc, tipo, valor, mesAno: mes });
+  saveAll();
+  renderEntradasFuturas();
+
+  document.getElementById('fut-desc').value  = '';
+  document.getElementById('fut-valor').value = '';
+  document.getElementById('fut-desc').focus();
+  showToast('Entrada futura adicionada ✓', 'ok', 2000);
+}
+
+function showFutError(msg) {
+  const el = document.getElementById('fut-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function deleteEntradaFutura(id) {
+  if (!confirm('Excluir esta entrada futura?')) return;
+  entradasFuturas = entradasFuturas.filter(e => e.id !== id);
+  saveAll();
+  renderEntradasFuturas();
+}
+
+function updateFutMetrics() {
+  const mesFiltro = (document.getElementById('fut-filter-mes') || {}).value || '';
+  const base = mesFiltro ? entradasFuturas.filter(e => e.mesAno === mesFiltro) : entradasFuturas;
+
+  const total   = base.reduce((s,e) => s+e.valor, 0);
+  const salario = base.filter(e => e.tipo==='salario').reduce((s,e) => s+e.valor, 0);
+  const vale    = base.filter(e => ['vale_alimentacao','vale_refeicao'].includes(e.tipo)).reduce((s,e) => s+e.valor, 0);
+  const outros  = base.filter(e => !['salario','vale_alimentacao','vale_refeicao'].includes(e.tipo)).reduce((s,e) => s+e.valor, 0);
+
+  document.getElementById('fut-total').textContent   = fmtVal(total);
+  document.getElementById('fut-salario').textContent = fmtVal(salario);
+  document.getElementById('fut-vale').textContent    = fmtVal(vale);
+  document.getElementById('fut-outros').textContent  = fmtVal(outros);
+}
+
+function updateFutMesFilter(meses) {
+  const sel = document.getElementById('fut-filter-mes');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Todos os meses</option>' +
+    meses.map(m => `<option value="${m}">${mesAnoLabel(m)}</option>`).join('');
+  if (current && meses.includes(current)) sel.value = current;
+}
+
+function sortFutBy(col) {
+  if (futSort.col === col) {
+    futSort.dir = cycleDir(futSort.dir);
+    if (futSort.dir === null) futSort.col = null;
+  } else { futSort.col = col; futSort.dir = 'asc'; }
+  renderEntradasFuturas();
+}
+
+function futGetter(e, col) {
+  if (col === 'mes')   return e.mesAno;
+  if (col === 'desc')  return e.desc.toLowerCase();
+  if (col === 'tipo')  return e.tipo;
+  if (col === 'valor') return e.valor;
+  return '';
+}
+
+function thFut(col, label) {
+  const active = futSort.col === col;
+  const icon   = !active ? '↕' : futSort.dir === 'asc' ? '↑' : '↓';
+  return `<th style="cursor:pointer;user-select:none;${active?'color:var(--accent-text);':''}" onclick="sortFutBy('${col}')">${label} <span style="font-size:10px;opacity:${active?1:0.4}">${icon}</span></th>`;
+}
+
+function renderEntradasFuturas() {
+  const searchEl = document.getElementById('fut-search');
+  const tipoEl   = document.getElementById('fut-filter-tipo');
+  const mesEl    = document.getElementById('fut-filter-mes');
+  if (!searchEl || !tipoEl) return; // tab ainda não renderizada no DOM
+
+  const q    = (searchEl.value || '').toLowerCase();
+  const tipo = tipoEl.value;
+  const mes  = (mesEl || {}).value || '';
+
+  let list = entradasFuturas.filter(e => {
+    if (q    && !e.desc.toLowerCase().includes(q)) return false;
+    if (tipo && e.tipo !== tipo)                   return false;
+    if (mes  && e.mesAno !== mes)                  return false;
+    return true;
+  });
+
+  list = futSort.col && futSort.dir
+    ? sortData(list, futSort.col, futSort.dir, futGetter)
+    : [...list].sort((a,b) => a.mesAno.localeCompare(b.mesAno));
+
+  document.getElementById('fut-head').innerHTML =
+    thFut('mes','Mês') + thFut('desc','Descrição') + thFut('tipo','Tipo') +
+    thFut('valor','Valor') + '<th style="width:44px"></th>';
+
+  const body = document.getElementById('fut-body');
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">
+      <div class="empty-icon">${entradasFuturas.length?'🔍':'🗓️'}</div>
+      <div class="empty-title">${entradasFuturas.length?'Nenhum resultado':'Nenhuma entrada futura cadastrada'}</div>
+      <div class="empty-sub">${entradasFuturas.length?'Tente outros filtros':'Use o formulário acima para planejar recebimentos futuros'}</div>
+    </div></td></tr>`;
+  } else {
+    body.innerHTML = list.map(e => `
+      <tr>
+        <td style="white-space:nowrap;color:var(--muted);font-size:12px">${mesAnoLabel(e.mesAno)}</td>
+        <td>${e.desc}</td>
+        <td><span class="badge b-tipo-${e.tipo}">${TIPO_LABELS[e.tipo]||e.tipo}</span></td>
+        <td style="font-weight:500;color:var(--green);white-space:nowrap">${fmtVal(e.valor)}</td>
+        <td style="text-align:center">
+          <button class="btn-delete" onclick="deleteEntradaFutura(${e.id})" title="Excluir">✕</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  updateFutMetrics();
+  updateFutMesFilter([...new Set(entradasFuturas.map(e => e.mesAno))].sort());
+}
+
+function exportFuturasJSON() {
+  if (!entradasFuturas.length) { showToast('Nenhuma entrada futura para exportar','warn',3000); return; }
+  const blob = new Blob([JSON.stringify(entradasFuturas, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'entradas_futuras_sicredi.json';
+  a.click();
+}
+
+function importFuturasClick() {
+  document.getElementById('fut-import-file').click();
+}
+
+function importFuturasJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) { showToast('JSON inválido — esperado um array','warn',4000); return; }
+      const existing = new Set(entradasFuturas.map(x => x.id));
+      let added = 0;
+      data.forEach(item => {
+        if (item.id && item.desc && item.tipo && item.valor && item.mesAno) {
+          if (!existing.has(item.id)) { entradasFuturas.push(item); added++; }
+        }
+      });
+      saveAll();
+      renderEntradasFuturas();
+      showToast(`${added} entrada(s) futura(s) importada(s) ✓`, 'ok', 3000);
+    } catch (_) {
+      showToast('Erro ao ler o arquivo JSON', 'warn', 4000);
+    }
+  };
+  rd.readAsText(file);
+  event.target.value = '';
+}
+
+// ---------- SAÍDAS ----------
+// Despesas pagas fora do cartão (Pix, dinheiro, débito). Entram no saldo geral
+// junto com as entradas e a fatura do cartão (ver calcSaldoGeral, na seção de métricas).
+
+function addSaida() {
+  const desc  = (document.getElementById('sd-desc').value || '').trim();
+  const tipo  = document.getElementById('sd-tipo').value;
+  const valor = parseCurrencyInput(document.getElementById('sd-valor').value);
+  const data  = document.getElementById('sd-data').value || todayISO();
+
+  if (!desc)      { showSdError('Informe uma descrição.'); return; }
+  if (valor <= 0) { showSdError('Informe um valor maior que zero.'); return; }
+  document.getElementById('sd-error').style.display = 'none';
+
+  saidas.push({ id: Date.now(), desc, tipo, valor, data });
+  saveAll();
+  updateSaidaMetrics();
+  renderSaidas();
+  renderSdMensal();
+  updateEnMetrics(); // saldo da aba Entradas também depende das saídas
+
+  document.getElementById('sd-desc').value  = '';
+  document.getElementById('sd-valor').value = '';
+  document.getElementById('sd-data').value  = todayISO();
+  document.getElementById('sd-desc').focus();
+  showToast('Saída adicionada ✓', 'ok', 2000);
+}
+
+function showSdError(msg) {
+  const el = document.getElementById('sd-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function deleteSaida(id) {
+  if (!confirm('Excluir esta saída?')) return;
+  saidas = saidas.filter(s => s.id !== id);
+  saveAll();
+  updateSaidaMetrics();
+  renderSaidas();
+  renderSdMensal();
+  updateEnMetrics();
+}
+
+function updateSaidaMetrics() {
+  const totalEl = document.getElementById('sd-total');
+  if (!totalEl) return; // aba ainda não presente no DOM
+
+  const mesFiltro = (document.getElementById('sd-filter-mes') || {}).value || '';
+  const base = mesFiltro ? saidas.filter(s => s.data.slice(0,7) === mesFiltro) : saidas;
+
+  const total     = base.reduce((s,x) => s+x.valor, 0);
+  const fixas     = base.filter(x => SAIDA_FIXAS.includes(x.tipo)).reduce((s,x) => s+x.valor, 0);
+  const variaveis = base.filter(x => SAIDA_VARIAVEIS.includes(x.tipo)).reduce((s,x) => s+x.valor, 0);
+  const outros    = base.filter(x => !SAIDA_FIXAS.includes(x.tipo) && !SAIDA_VARIAVEIS.includes(x.tipo)).reduce((s,x) => s+x.valor, 0);
+
+  totalEl.textContent                                 = fmtVal(total);
+  document.getElementById('sd-fixas').textContent      = fmtVal(fixas);
+  document.getElementById('sd-variaveis').textContent  = fmtVal(variaveis);
+  document.getElementById('sd-outros').textContent     = fmtVal(outros);
+
+  const saldoEl = document.getElementById('sd-saldo');
+  const saldo   = calcSaldoGeral(mesFiltro);
+  saldoEl.textContent = fmtVal(saldo);
+  saldoEl.className   = 'metric-value ' + (saldo >= 0 ? 'green' : 'red');
+}
+
+function renderSdMensal() {
+  const el = document.getElementById('sd-mensal-body');
+  if (!el) return;
+
+  const map = {};
+  saidas.forEach(s => {
+    const k = s.data.slice(0,7);
+    if (!map[k]) map[k] = { mesAno: k, total: 0, fixas: 0, variaveis: 0, outros: 0 };
+    map[k].total += s.valor;
+    if (SAIDA_FIXAS.includes(s.tipo))          map[k].fixas += s.valor;
+    else if (SAIDA_VARIAVEIS.includes(s.tipo)) map[k].variaveis += s.valor;
+    else                                       map[k].outros += s.valor;
+  });
+
+  const rows = Object.values(map).sort((a,b) => b.mesAno.localeCompare(a.mesAno));
+
+  el.innerHTML = !rows.length
+    ? `<tr><td colspan="5" style="text-align:center;padding:1.25rem;color:var(--muted);font-size:13px">Nenhuma saída cadastrada</td></tr>`
+    : rows.map(r => `
+      <tr style="cursor:pointer" onclick="filterSdByMes('${r.mesAno}')" title="Filtrar por ${mesAnoLabel(r.mesAno)}">
+        <td style="font-weight:500">${mesAnoLabel(r.mesAno)}</td>
+        <td style="color:var(--red);font-weight:500">${fmtVal(r.total)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.fixas)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.variaveis)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.outros)}</td>
+      </tr>`).join('');
+
+  updateSdMesFilter(rows.map(r => r.mesAno));
+}
+
+function filterSdByMes(mesAno) {
+  const sel = document.getElementById('sd-filter-mes');
+  if (!sel) return;
+  sel.value = sel.value === mesAno ? '' : mesAno;
+  updateSaidaMetrics();
+  renderSaidas();
+}
+
+function updateSdMesFilter(meses) {
+  const sel = document.getElementById('sd-filter-mes');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Todos os meses</option>' +
+    meses.map(m => `<option value="${m}">${mesAnoLabel(m)}</option>`).join('');
+  if (current && meses.includes(current)) sel.value = current;
+}
+
+function sortSdBy(col) {
+  if (sdSort.col === col) {
+    sdSort.dir = cycleDir(sdSort.dir);
+    if (sdSort.dir === null) sdSort.col = null;
+  } else { sdSort.col = col; sdSort.dir = 'asc'; }
+  renderSaidas();
+}
+
+function sdGetter(s, col) {
+  if (col === 'data')  return s.data;
+  if (col === 'desc')  return s.desc.toLowerCase();
+  if (col === 'tipo')  return s.tipo;
+  if (col === 'valor') return s.valor;
+  return '';
+}
+
+function thSd(col, label) {
+  const active = sdSort.col === col;
+  const icon   = !active ? '↕' : sdSort.dir === 'asc' ? '↑' : '↓';
+  return `<th style="cursor:pointer;user-select:none;${active?'color:var(--accent-text);':''}" onclick="sortSdBy('${col}')">${label} <span style="font-size:10px;opacity:${active?1:0.4}">${icon}</span></th>`;
+}
+
+function renderSaidas() {
+  const searchEl = document.getElementById('sd-search');
+  const tipoEl   = document.getElementById('sd-filter-tipo');
+  if (!searchEl || !tipoEl) return; // aba ainda não presente no DOM
+
+  const q    = (searchEl.value || '').toLowerCase();
+  const tipo = tipoEl.value;
+  const mes  = (document.getElementById('sd-filter-mes') || {}).value || '';
+
+  let list = saidas.filter(s => {
+    if (q    && !s.desc.toLowerCase().includes(q)) return false;
+    if (tipo && s.tipo !== tipo)                   return false;
+    if (mes  && s.data.slice(0,7) !== mes)         return false;
+    return true;
+  });
+
+  list = sdSort.col && sdSort.dir
+    ? sortData(list, sdSort.col, sdSort.dir, sdGetter)
+    : [...list].sort((a,b) => b.data.localeCompare(a.data));
+
+  document.getElementById('sd-head').innerHTML =
+    thSd('data','Data') + thSd('desc','Descrição') + thSd('tipo','Categoria') +
+    thSd('valor','Valor') + '<th style="width:44px"></th>';
+
+  const body = document.getElementById('sd-body');
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">
+      <div class="empty-icon">${saidas.length?'🔍':'💸'}</div>
+      <div class="empty-title">${saidas.length?'Nenhum resultado':'Nenhuma saída cadastrada'}</div>
+      <div class="empty-sub">${saidas.length?'Tente outros filtros':'Use o formulário acima para lançar despesas fora do cartão'}</div>
+    </div></td></tr>`;
+    return;
+  }
+
+  body.innerHTML = list.map(s => `
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${isoToBR(s.data)}</td>
+      <td>${s.desc}</td>
+      <td><span class="badge b-cat-${s.tipo}">${SAIDA_LABELS[s.tipo]||s.tipo}</span></td>
+      <td style="font-weight:500;color:var(--red);white-space:nowrap">${fmtVal(s.valor)}</td>
+      <td style="text-align:center">
+        <button class="btn-delete" onclick="deleteSaida(${s.id})" title="Excluir">✕</button>
+      </td>
+    </tr>`).join('');
+}
+
+function exportSaidasJSON() {
+  if (!saidas.length) { showToast('Nenhuma saída para exportar','warn',3000); return; }
+  const blob = new Blob([JSON.stringify(saidas, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'saidas_sicredi.json';
+  a.click();
+}
+
+function importSaidasClick() {
+  document.getElementById('sd-import-file').click();
+}
+
+function importSaidasJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) { showToast('JSON inválido — esperado um array','warn',4000); return; }
+      const existing = new Set(saidas.map(x => x.id));
+      let added = 0;
+      data.forEach(item => {
+        if (item.id && item.desc && item.tipo && item.valor && item.data) {
+          if (!existing.has(item.id)) { saidas.push(item); added++; }
+        }
+      });
+      saveAll();
+      updateSaidaMetrics();
+      renderSaidas();
+      renderSdMensal();
+      updateEnMetrics();
+      showToast(`${added} saída(s) importada(s) ✓`, 'ok', 3000);
+    } catch (_) {
+      showToast('Erro ao ler o arquivo JSON', 'warn', 4000);
+    }
+  };
+  rd.readAsText(file);
+  event.target.value = '';
+}
+
+// ---------- INIT ----------
+
+loadAll(); // async — carrega dados do servidor e depois renderiza

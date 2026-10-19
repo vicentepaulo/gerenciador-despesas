@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sicredi Faturas</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      Sicredi faturas
+    </div>
+    <div class="topbar-right">
+      <div class="theme-toggle">
+        <button class="theme-btn on" id="btn-light" onclick="setTheme('light')">Claro</button>
+        <button class="theme-btn"   id="btn-dark"  onclick="setTheme('dark')">Escuro</button>
+      </div>
+      <button class="hamburger" onclick="toggleMobileMenu()" aria-label="Menu">☰</button>
+    </div>
+  </div>
+
+  <!-- NAV -->
+  <div class="nav" id="nav-menu">
+    <button class="nav-btn active" onclick="switchTab('import',this)">Importar CSV</button>
+    <button class="nav-btn"        onclick="switchTab('entradas',this)">Entradas</button>
+    <button class="nav-btn"        onclick="switchTab('futuras',this)">Entradas Futuras</button>
+    <button class="nav-btn"        onclick="switchTab('saidas',this)">Saídas</button>
+    <button class="nav-btn"        onclick="switchTab('transacoes',this)">Transações</button>
+    <button class="nav-btn"        onclick="switchTab('parcelamentos',this)">Parcelamentos</button>
+    <button class="nav-btn"        onclick="switchTab('faturas',this)">Histórico</button>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+
+    <!-- ======== TAB: IMPORTAR ======== -->
+    <div id="tab-import" class="tab active">
+
+      <div class="upload-zone"
+           id="dropzone"
+           onclick="document.getElementById('finput').click()"
+           ondragover="ev(event,true)"
+           ondragleave="ev(event,false)"
+           ondrop="drop(event)">
+        <div class="u-icon">📄</div>
+        <div class="u-title">Arraste o CSV do Sicredi ou clique para selecionar</div>
+        <div class="u-sub">
+          Formato: <b>Data · Descrição · Parcela · Valor · Valor em Dólar · Adicional · Nome</b>
+        </div>
+      </div>
+      <input type="file" id="finput" class="upload-input" accept=".csv,.txt" onchange="handleFile(event)">
+
+      <!-- PREVIEW -->
+      <div id="preview-block" style="display:none; margin-top:1rem">
+
+        <div class="fatura-header" id="fatura-info"></div>
+
+        <div class="card" style="margin-bottom:.875rem">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px">
+            <div style="font-size:14px; font-weight:500; color:var(--text)" id="preview-title">
+              Pré-visualização
+            </div>
+            <div class="preview-actions" style="display:flex; gap:8px">
+              <button class="btn btn-primary" onclick="confirmImport()">Confirmar</button>
+              <button class="btn"             onclick="cancelImport()">Cancelar</button>
+            </div>
+          </div>
+          <div id="preview-cols" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px"></div>
+          <div class="import-log" id="import-log"></div>
+        </div>
+
+        <div class="card" style="padding:0; overflow:hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Descrição</th>
+                  <th>Parcela</th>
+                  <th>Valor</th>
+                  <th>Tipo</th>
+                  <th>Adicional</th>
+                </tr>
+              </thead>
+              <tbody id="preview-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <!-- /PREVIEW -->
+
+      <!-- GUIDE -->
+      <div style="margin-top:1.25rem">
+        <div class="sec-title">Como exportar o CSV no Sicredi</div>
+        <div class="card" style="padding:.75rem 1rem">
+          <div class="guide-step">
+            <div class="step-num">1</div>
+            <div class="step-txt">Acesse o app ou internet banking do Sicredi</div>
+          </div>
+          <div class="guide-step">
+            <div class="step-num">2</div>
+            <div class="step-txt">
+              Vá em <span style="color:var(--accent-text); font-weight:500">Cartão de Crédito → Fatura</span>
+            </div>
+          </div>
+          <div class="guide-step">
+            <div class="step-num">3</div>
+            <div class="step-txt">
+              Selecione a fatura e toque em
+              <span style="color:var(--accent-text); font-weight:500">Exportar / Baixar extrato</span>
+            </div>
+          </div>
+          <div class="guide-step">
+            <div class="step-num">4</div>
+            <div class="step-txt">
+              Escolha o formato <span style="color:var(--accent-text); font-weight:500">CSV</span> e salve
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <!-- /TAB IMPORTAR -->
+
+    <!-- ======== TAB: ENTRADAS ======== -->
+    <div id="tab-entradas" class="tab">
+
+      <!-- SUMMARY METRICS -->
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Total de entradas</div>
+          <div class="metric-value green" id="en-total">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Salário</div>
+          <div class="metric-value green" id="en-salario">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Vale alimentação</div>
+          <div class="metric-value green" id="en-vale">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Outros</div>
+          <div class="metric-value green" id="en-outros">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Saldo (entradas − fatura − saídas)</div>
+          <div class="metric-value" id="en-saldo">R$ 0,00</div>
+        </div>
+      </div>
+
+      <!-- FORM -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="sec-title" style="margin-bottom:12px">Nova entrada</div>
+        <div class="entrada-form">
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <input type="text" class="pill form-input" id="en-desc" placeholder="Ex: Salário março, VR semana 1…">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tipo</label>
+            <select class="pill form-input" id="en-tipo">
+              <option value="salario">Salário</option>
+              <option value="vale_alimentacao">Vale alimentação</option>
+              <option value="vale_refeicao">Vale refeição</option>
+              <option value="freelance">Freelance</option>
+              <option value="bonus">Bônus</option>
+              <option value="aluguel">Aluguel recebido</option>
+              <option value="investimento">Rendimento investimento</option>
+              <option value="outros">Outros</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Valor (R$)</label>
+            <input type="text" class="pill form-input" id="en-valor" placeholder="0,00" oninput="maskCurrency(this)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data</label>
+            <input type="date" class="pill form-input" id="en-data">
+          </div>
+          <div class="form-group form-actions">
+            <button class="btn btn-primary" onclick="addEntrada()">Adicionar entrada</button>
+          </div>
+        </div>
+        <div id="en-error" class="form-error" style="display:none"></div>
+      </div>
+
+      <!-- FILTER + ACTIONS -->
+      <div class="filter-row">
+        <input type="text" class="pill" placeholder="Buscar descrição…" id="en-search" oninput="renderEntradas()">
+        <select class="pill" id="en-filter-mes" onchange="updateEnMetrics();renderEntradas()">
+          <option value="">Todos os meses</option>
+        </select>
+        <select class="pill" id="en-filter-tipo" onchange="renderEntradas()">
+          <option value="">Todos os tipos</option>
+          <option value="salario">Salário</option>
+          <option value="vale_alimentacao">Vale alimentação</option>
+          <option value="vale_refeicao">Vale refeição</option>
+          <option value="freelance">Freelance</option>
+          <option value="bonus">Bônus</option>
+          <option value="aluguel">Aluguel recebido</option>
+          <option value="investimento">Rendimento investimento</option>
+          <option value="outros">Outros</option>
+        </select>
+        <button class="btn" onclick="exportEntradasJSON()">Exportar JSON ↗</button>
+        <button class="btn" onclick="importEntradasClick()">Importar JSON ↗</button>
+        <input type="file" id="en-import-file" class="upload-input" accept=".json" onchange="importEntradasJSON(event)">
+      </div>
+
+      <!-- MONTHLY SUMMARY -->
+      <div style="margin-bottom:1rem">
+        <div class="sec-title">Resumo por mês <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--hint)">(clique em uma linha para filtrar)</span></div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mês</th>
+                  <th>Total</th>
+                  <th>Salário</th>
+                  <th>Vale</th>
+                  <th>Outros</th>
+                </tr>
+              </thead>
+              <tbody id="en-mensal-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABLE -->
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="en-head">
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Tipo</th>
+                <th>Valor</th>
+                <th style="width:60px"></th>
+              </tr>
+            </thead>
+            <tbody id="en-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+    <!-- /TAB ENTRADAS -->
+
+    <!-- ======== TAB: ENTRADAS FUTURAS ======== -->
+    <div id="tab-futuras" class="tab">
+
+      <!-- SUMMARY METRICS -->
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Total previsto</div>
+          <div class="metric-value green" id="fut-total">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Salário</div>
+          <div class="metric-value green" id="fut-salario">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Vale alimentação</div>
+          <div class="metric-value green" id="fut-vale">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Outros</div>
+          <div class="metric-value green" id="fut-outros">R$ 0,00</div>
+        </div>
+      </div>
+
+      <!-- FORM -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="sec-title" style="margin-bottom:12px">Nova entrada futura</div>
+        <div class="entrada-form">
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <input type="text" class="pill form-input" id="fut-desc" placeholder="Ex: 13º salário, bônus previsto…">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tipo</label>
+            <select class="pill form-input" id="fut-tipo">
+              <option value="salario">Salário</option>
+              <option value="vale_alimentacao">Vale alimentação</option>
+              <option value="vale_refeicao">Vale refeição</option>
+              <option value="freelance">Freelance</option>
+              <option value="bonus">Bônus</option>
+              <option value="aluguel">Aluguel recebido</option>
+              <option value="investimento">Rendimento investimento</option>
+              <option value="outros">Outros</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Valor (R$)</label>
+            <input type="text" class="pill form-input" id="fut-valor" placeholder="0,00" oninput="maskCurrency(this)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mês</label>
+            <input type="month" class="pill form-input" id="fut-mes">
+          </div>
+          <div class="form-group form-actions">
+            <button class="btn btn-primary" onclick="addEntradaFutura()">Adicionar</button>
+          </div>
+        </div>
+        <div id="fut-error" class="form-error" style="display:none"></div>
+      </div>
+
+      <!-- FILTER + ACTIONS -->
+      <div class="filter-row">
+        <input type="text" class="pill" placeholder="Buscar descrição…" id="fut-search" oninput="renderEntradasFuturas()">
+        <select class="pill" id="fut-filter-mes" onchange="renderEntradasFuturas()">
+          <option value="">Todos os meses</option>
+        </select>
+        <select class="pill" id="fut-filter-tipo" onchange="renderEntradasFuturas()">
+          <option value="">Todos os tipos</option>
+          <option value="salario">Salário</option>
+          <option value="vale_alimentacao">Vale alimentação</option>
+          <option value="vale_refeicao">Vale refeição</option>
+          <option value="freelance">Freelance</option>
+          <option value="bonus">Bônus</option>
+          <option value="aluguel">Aluguel recebido</option>
+          <option value="investimento">Rendimento investimento</option>
+          <option value="outros">Outros</option>
+        </select>
+        <button class="btn" onclick="exportFuturasJSON()">Exportar JSON ↗</button>
+        <button class="btn" onclick="importFuturasClick()">Importar JSON ↗</button>
+        <input type="file" id="fut-import-file" class="upload-input" accept=".json" onchange="importFuturasJSON(event)">
+      </div>
+
+      <!-- TABLE -->
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="fut-head">
+                <th>Mês</th>
+                <th>Descrição</th>
+                <th>Tipo</th>
+                <th>Valor</th>
+                <th style="width:60px"></th>
+              </tr>
+            </thead>
+            <tbody id="fut-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="hint-text">
+        Use esta aba para planejar recebimentos que ainda vão acontecer (ex: R$ 300 de Bônus em Novembro). Elas não entram nos totais da aba Entradas até a data chegar — cadastre lá quando o valor for efetivamente recebido.
+      </div>
+
+    </div>
+    <!-- /TAB ENTRADAS FUTURAS -->
+
+    <!-- ======== TAB: SAÍDAS ======== -->
+    <div id="tab-saidas" class="tab">
+
+      <!-- SUMMARY METRICS -->
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Total de saídas</div>
+          <div class="metric-value red" id="sd-total">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Fixas</div>
+          <div class="metric-value red" id="sd-fixas">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Variáveis</div>
+          <div class="metric-value red" id="sd-variaveis">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Outros</div>
+          <div class="metric-value red" id="sd-outros">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Saldo (entradas − fatura − saídas)</div>
+          <div class="metric-value" id="sd-saldo">R$ 0,00</div>
+        </div>
+      </div>
+
+      <!-- FORM -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="sec-title" style="margin-bottom:12px">Nova saída (fora do cartão)</div>
+        <div class="entrada-form">
+          <div class="form-group">
+            <label class="form-label">Descrição</label>
+            <input type="text" class="pill form-input" id="sd-desc" placeholder="Ex: Aluguel, mercado, Uber…">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Categoria</label>
+            <select class="pill form-input" id="sd-tipo">
+              <option value="moradia">Moradia / Aluguel</option>
+              <option value="contas">Contas (água, luz, internet)</option>
+              <option value="mercado">Mercado</option>
+              <option value="transporte">Transporte</option>
+              <option value="saude">Saúde</option>
+              <option value="educacao">Educação</option>
+              <option value="lazer">Lazer</option>
+              <option value="pix_transferencia">Pix / Transferência</option>
+              <option value="outros">Outros</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Valor (R$)</label>
+            <input type="text" class="pill form-input" id="sd-valor" placeholder="0,00" oninput="maskCurrency(this)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data</label>
+            <input type="date" class="pill form-input" id="sd-data">
+          </div>
+          <div class="form-group form-actions">
+            <button class="btn btn-primary" onclick="addSaida()">Adicionar saída</button>
+          </div>
+        </div>
+        <div id="sd-error" class="form-error" style="display:none"></div>
+      </div>
+
+      <!-- FILTER + ACTIONS -->
+      <div class="filter-row">
+        <input type="text" class="pill" placeholder="Buscar descrição…" id="sd-search" oninput="renderSaidas()">
+        <select class="pill" id="sd-filter-mes" onchange="updateSaidaMetrics();renderSaidas()">
+          <option value="">Todos os meses</option>
+        </select>
+        <select class="pill" id="sd-filter-tipo" onchange="renderSaidas()">
+          <option value="">Todas as categorias</option>
+          <option value="moradia">Moradia / Aluguel</option>
+          <option value="contas">Contas (água, luz, internet)</option>
+          <option value="mercado">Mercado</option>
+          <option value="transporte">Transporte</option>
+          <option value="saude">Saúde</option>
+          <option value="educacao">Educação</option>
+          <option value="lazer">Lazer</option>
+          <option value="pix_transferencia">Pix / Transferência</option>
+          <option value="outros">Outros</option>
+        </select>
+        <button class="btn" onclick="exportSaidasJSON()">Exportar JSON ↗</button>
+        <button class="btn" onclick="importSaidasClick()">Importar JSON ↗</button>
+        <input type="file" id="sd-import-file" class="upload-input" accept=".json" onchange="importSaidasJSON(event)">
+      </div>
+
+      <!-- MONTHLY SUMMARY -->
+      <div style="margin-bottom:1rem">
+        <div class="sec-title">Resumo por mês <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--hint)">(clique em uma linha para filtrar)</span></div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mês</th>
+                  <th>Total</th>
+                  <th>Fixas</th>
+                  <th>Variáveis</th>
+                  <th>Outros</th>
+                </tr>
+              </thead>
+              <tbody id="sd-mensal-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABLE -->
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="sd-head">
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Categoria</th>
+                <th>Valor</th>
+                <th style="width:60px"></th>
+              </tr>
+            </thead>
+            <tbody id="sd-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="hint-text">
+        Lance aqui despesas pagas fora do cartão de crédito (Pix, dinheiro, débito). Elas entram no saldo geral
+        junto com as entradas e a fatura do cartão, para mostrar quanto realmente sobra no mês.
+      </div>
+
+    </div>
+    <!-- /TAB SAÍDAS -->
+
+    <!-- ======== TAB: TRANSAÇÕES ======== -->
+    <div id="tab-transacoes" class="tab">
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Total da fatura</div>
+          <div class="metric-value red" id="m-total">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Débitos</div>
+          <div class="metric-value red" id="m-debitos">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Créditos</div>
+          <div class="metric-value green" id="m-creditos">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Parcelamentos</div>
+          <div class="metric-value blue" id="m-parcels">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Transações</div>
+          <div class="metric-value" id="m-count">0</div>
+        </div>
+      </div>
+
+      <div class="filter-row">
+        <input type="text"  class="pill" placeholder="Buscar descrição..." id="search"  oninput="renderTx()">
+        <select class="pill" id="ftype" onchange="renderTx()">
+          <option value="">Todos os tipos</option>
+          <option value="debito">Débito</option>
+          <option value="credito">Crédito</option>
+          <option value="parcelado">Parcelado</option>
+        </select>
+        <select class="pill" id="ffatura" onchange="renderTx()">
+          <option value="">Todas as faturas</option>
+        </select>
+        <button class="btn" onclick="exportCSV()">Exportar ↗</button>
+      </div>
+
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="tx-head">
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Parcela</th>
+                <th>Valor</th>
+                <th>Tipo</th>
+                <th>Fatura</th>
+              </tr>
+            </thead>
+            <tbody id="tx-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+    <!-- /TAB TRANSAÇÕES -->
+
+    <!-- ======== TAB: PARCELAMENTOS ======== -->
+    <div id="tab-parcelamentos" class="tab">
+
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Em aberto</div>
+          <div class="metric-value blue" id="ip-aberto">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Quitados</div>
+          <div class="metric-value green" id="ip-quitado">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Total restante</div>
+          <div class="metric-value red" id="ip-restante">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Comprometido/mês</div>
+          <div class="metric-value amber" id="ip-mes">R$ 0,00</div>
+        </div>
+      </div>
+
+      <div class="filter-row">
+        <select class="pill" id="ip-filter" onchange="renderInstall()">
+          <option value="todos">Todos</option>
+          <option value="aberto">Em aberto</option>
+          <option value="quitado">Quitados</option>
+        </select>
+      </div>
+
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="ip-head">
+                <th>Data</th>
+                <th>Descrição</th>
+                <th>Parcela</th>
+                <th>Progresso</th>
+                <th>Valor</th>
+                <th>Restante estimado</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="ip-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="hint-text">
+        Cada linha representa uma parcela individual. Restante estimado = parcelas futuras × valor desta parcela.
+        Clique no status para alternar entre <strong>Em aberto</strong> e <strong>Quitado</strong> — os totais atualizam automaticamente.
+      </div>
+
+    </div>
+    <!-- /TAB PARCELAMENTOS -->
+
+    <!-- ======== TAB: HISTÓRICO ======== -->
+    <div id="tab-faturas" class="tab">
+      <div id="faturas-list" class="faturas-list">
+        <div class="empty-state">
+          <div class="empty-icon">🧾</div>
+          <div class="empty-title">Nenhuma fatura importada</div>
+          <div class="empty-sub">Importe seus CSVs para ver o histórico aqui</div>
+        </div>
+      </div>
+    </div>
+    <!-- /TAB HISTÓRICO -->
+
+  </div>
+  <!-- /CONTENT -->
+
+</div>
+<!-- /app-shell -->
+
+<script src="app.js"></script>
+</body>
+</html>
