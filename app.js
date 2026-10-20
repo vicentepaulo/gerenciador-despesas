@@ -955,7 +955,12 @@ function repData(dataOrig, mesDestino) {
   return `${mesDestino}-${String(dia).padStart(2, '0')}`;
 }
 
+// Depois que o usuário escolhe "Copiar de", trocar "Para" não sobrescreve mais a origem
+// (permite copiar para meses passados, ex: setembro → agosto).
+let repFromManual = false;
+
 function openRepetir() {
+  repFromManual = false;
   const to = todayISO().slice(0, 7);
   document.getElementById('rep-to').value   = to;
   document.getElementById('rep-from').value = shiftMes(to, -1);
@@ -969,10 +974,24 @@ function closeRepetir() {
   document.getElementById('rep-card').style.display = 'none';
 }
 
-// Ao trocar o mês de destino, sugere o mês anterior a ele como origem.
+// Ao trocar o mês de destino, sugere o mês anterior a ele como origem
+// — só enquanto o usuário não escolheu a origem por conta própria.
 function repToChanged() {
   const to = document.getElementById('rep-to').value;
-  if (to) document.getElementById('rep-from').value = shiftMes(to, -1);
+  if (to && !repFromManual) document.getElementById('rep-from').value = shiftMes(to, -1);
+  renderRepetir();
+}
+
+function repFromChanged() {
+  repFromManual = true;
+  renderRepetir();
+}
+
+function repInverter() {
+  const fromEl = document.getElementById('rep-from');
+  const toEl   = document.getElementById('rep-to');
+  [fromEl.value, toEl.value] = [toEl.value, fromEl.value];
+  repFromManual = true;
   renderRepetir();
 }
 

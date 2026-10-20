@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sicredi Faturas</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -299,13 +299,15 @@
         <div class="rep-meses">
           <div class="form-group">
             <label class="form-label">Copiar de</label>
-            <input type="month" class="pill form-input" id="rep-from" onchange="renderRepetir()">
+            <input type="month" class="pill form-input" id="rep-from" onchange="repFromChanged()">
           </div>
+          <button class="btn rep-swap" onclick="repInverter()" title="Trocar origem e destino">⇄ Inverter</button>
           <div class="form-group">
             <label class="form-label">Para</label>
             <input type="month" class="pill form-input" id="rep-to" onchange="repToChanged()">
           </div>
         </div>
+        <div class="rep-hint">Funciona para qualquer mês, inclusive meses passados (ex: copiar de setembro para agosto).</div>
         <div class="table-wrap" style="margin-top:12px">
           <table>
             <thead>
@@ -769,7 +771,7 @@
 </div>
 <!-- /app-shell -->
 
-<script src="app.js?v=7"></script>
-<script src="dashboard.js?v=7"></script>
+<script src="app.js?v=8"></script>
+<script src="dashboard.js?v=8"></script>
 </body>
 </html>
