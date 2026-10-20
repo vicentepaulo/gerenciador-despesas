@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sicredi Faturas</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -192,6 +192,39 @@
         <div id="en-error" class="form-error" style="display:none"></div>
       </div>
 
+      <!-- REPETIR DE OUTRO MÊS -->
+      <div class="card" id="rep-card" style="margin-bottom:1rem;display:none">
+        <div class="sec-title" style="margin-bottom:12px">Repetir entradas de outro mês</div>
+        <div class="rep-meses">
+          <div class="form-group">
+            <label class="form-label">Copiar de</label>
+            <input type="month" class="pill form-input" id="rep-from" onchange="renderRepetir()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Para</label>
+            <input type="month" class="pill form-input" id="rep-to" onchange="repToChanged()">
+          </div>
+        </div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:36px"><input type="checkbox" id="rep-all" onchange="repToggleAll(this.checked)" title="Selecionar todas"></th>
+                <th>Nova data</th>
+                <th>Descrição</th>
+                <th>Tipo</th>
+                <th>Valor (R$)</th>
+              </tr>
+            </thead>
+            <tbody id="rep-body"></tbody>
+          </table>
+        </div>
+        <div class="preview-actions" style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary" id="rep-confirm" onclick="confirmRepetir()">Repetir selecionadas</button>
+          <button class="btn" onclick="closeRepetir()">Fechar</button>
+        </div>
+      </div>
+
       <!-- FILTER + ACTIONS -->
       <div class="filter-row">
         <input type="text" class="pill" placeholder="Buscar descrição…" id="en-search" oninput="renderEntradas()">
@@ -209,6 +242,7 @@
           <option value="investimento">Rendimento investimento</option>
           <option value="outros">Outros</option>
         </select>
+        <button class="btn" onclick="openRepetir()">Repetir de outro mês ↻</button>
         <button class="btn" onclick="exportEntradasJSON()">Exportar JSON ↗</button>
         <button class="btn" onclick="importEntradasClick()">Importar JSON ↗</button>
         <input type="file" id="en-import-file" class="upload-input" accept=".json" onchange="importEntradasJSON(event)">
@@ -634,6 +668,6 @@
 </div>
 <!-- /app-shell -->
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

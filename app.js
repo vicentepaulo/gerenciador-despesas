@@ -732,6 +732,133 @@ function deleteEntrada(id) {
   updateSaidaMetrics();
 }
 
+// ---------- REPETIR ENTRADAS ----------
+// Copia entradas selecionadas de um mês para outro (ex: salário e vales que se
+// repetem todo mês). Mantém o mesmo dia — ajustado para o último dia do mês
+// de destino quando ele for mais curto (ex: 31/01 → 28/02).
+
+function shiftMes(mesAno, delta) {
+  const [y, m] = mesAno.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function repData(dataOrig, mesDestino) {
+  const [y, m] = mesDestino.split('-').map(Number);
+  const ultimoDia = new Date(y, m, 0).getDate();
+  const dia = Math.min(parseInt(dataOrig.slice(8, 10)), ultimoDia);
+  return `${mesDestino}-${String(dia).padStart(2, '0')}`;
+}
+
+function openRepetir() {
+  const to = todayISO().slice(0, 7);
+  document.getElementById('rep-to').value   = to;
+  document.getElementById('rep-from').value = shiftMes(to, -1);
+  const card = document.getElementById('rep-card');
+  card.style.display = '';
+  renderRepetir();
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeRepetir() {
+  document.getElementById('rep-card').style.display = 'none';
+}
+
+// Ao trocar o mês de destino, sugere o mês anterior a ele como origem.
+function repToChanged() {
+  const to = document.getElementById('rep-to').value;
+  if (to) document.getElementById('rep-from').value = shiftMes(to, -1);
+  renderRepetir();
+}
+
+function renderRepetir() {
+  const from = document.getElementById('rep-from').value;
+  const to   = document.getElementById('rep-to').value;
+  const body = document.getElementById('rep-body');
+
+  const list = from
+    ? entradas.filter(e => e.data.slice(0,7) === from).sort((a,b) => a.data.localeCompare(b.data))
+    : [];
+
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="5"><div class="empty-state">
+      <div class="empty-title">Nenhuma entrada em ${from ? mesAnoLabel(from) : 'mês não selecionado'}</div>
+      <div class="empty-sub">Escolha outro mês em "Copiar de"</div>
+    </div></td></tr>`;
+    updateRepCount();
+    return;
+  }
+
+  // Entradas com mesma descrição e tipo já lançadas no destino vêm desmarcadas,
+  // para não duplicar sem querer.
+  const noDestino = new Set(entradas
+    .filter(e => e.data.slice(0,7) === to)
+    .map(e => e.tipo + '|' + e.desc.toLowerCase()));
+
+  body.innerHTML = list.map(e => {
+    const existe = noDestino.has(e.tipo + '|' + e.desc.toLowerCase());
+    return `
+    <tr data-id="${e.id}" class="${existe ? 'rep-off' : ''}">
+      <td><input type="checkbox" ${existe ? '' : 'checked'} onchange="repRowToggle(this)"></td>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${to ? isoToBR(repData(e.data, to)) : '—'}</td>
+      <td>${e.desc}${existe ? '<span class="rep-tag">já existe no mês</span>' : ''}</td>
+      <td><span class="badge b-tipo-${e.tipo}">${TIPO_LABELS[e.tipo]||e.tipo}</span></td>
+      <td><input type="text" class="pill" value="${e.valor.toFixed(2).replace('.', ',')}" oninput="maskCurrency(this)"></td>
+    </tr>`;
+  }).join('');
+  updateRepCount();
+}
+
+function repRowToggle(cb) {
+  cb.closest('tr').classList.toggle('rep-off', !cb.checked);
+  updateRepCount();
+}
+
+function repToggleAll(on) {
+  document.querySelectorAll('#rep-body tr[data-id]').forEach(tr => {
+    tr.querySelector('input[type="checkbox"]').checked = on;
+    tr.classList.toggle('rep-off', !on);
+  });
+  updateRepCount();
+}
+
+function updateRepCount() {
+  const from  = document.getElementById('rep-from').value;
+  const to    = document.getElementById('rep-to').value;
+  const boxes = document.querySelectorAll('#rep-body tr[data-id] input[type="checkbox"]');
+  const n     = [...boxes].filter(b => b.checked).length;
+  const btn   = document.getElementById('rep-confirm');
+  btn.textContent = `Repetir selecionadas (${n})`;
+  btn.disabled    = !n || !to || from === to;
+  document.getElementById('rep-all').checked = boxes.length > 0 && n === boxes.length;
+}
+
+function confirmRepetir() {
+  const to = document.getElementById('rep-to').value;
+  if (!to) return;
+  const base = Date.now();
+  let added = 0;
+
+  document.querySelectorAll('#rep-body tr[data-id]').forEach(tr => {
+    if (!tr.querySelector('input[type="checkbox"]').checked) return;
+    const orig  = entradas.find(e => e.id === Number(tr.dataset.id));
+    const valor = parseCurrencyInput(tr.querySelector('input[type="text"]').value);
+    if (!orig || valor <= 0) return;
+    entradas.push({ id: base + added, desc: orig.desc, tipo: orig.tipo, valor, data: repData(orig.data, to) });
+    added++;
+  });
+
+  if (!added) { showToast('Nenhuma entrada com valor válido selecionada', 'warn', 3000); return; }
+
+  saveAll();
+  updateEnMetrics();
+  renderEntradas();
+  renderEnMensal();
+  updateSaidaMetrics();
+  closeRepetir();
+  showToast(`${added} ${added === 1 ? 'entrada copiada' : 'entradas copiadas'} para ${mesAnoLabel(to)} ✓`, 'ok', 2500);
+}
+
 // Saldo geral = total de entradas − total da fatura do cartão (débitos − créditos) − total de saídas.
 // Usado tanto na aba Entradas quanto na aba Saídas para manter os dois números sempre coerentes.
 function calcSaldoGeral(mesFiltro) {

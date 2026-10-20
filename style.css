@@ -285,6 +285,7 @@ input.pill { flex: 1; min-width: 120px; }
 
 .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .btn-primary:hover { background: var(--accent-text); }
+.btn:disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
 
 .btn-sm { padding: 4px 10px; font-size: 12px; min-height: 30px; border-radius: 6px; }
 
@@ -478,6 +479,13 @@ tr.quitado td    { opacity: .5; }
 .form-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .form-input { width: 100%; }
 .form-actions { display: flex; align-items: flex-end; gap: 6px; }
+
+/* Repetir entradas de outro mês */
+.rep-meses { display: grid; grid-template-columns: repeat(2, minmax(0, 200px)); gap: 10px; }
+#rep-body input[type="checkbox"], #rep-all { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+#rep-body .pill { width: 110px; padding: 5px 8px; }
+#rep-body tr.rep-off td:not(:first-child) { opacity: .5; }
+.rep-tag { font-size: 11px; color: var(--hint); margin-left: 6px; white-space: nowrap; }
 
 .form-error {
   margin-top: 10px;
