@@ -799,20 +799,34 @@ function renderFaturas() {
 
 // ---------- METRICS ----------
 
+// Métricas da aba Transações seguem a fatura selecionada no filtro.
+// Com uma fatura escolhida, "Total da fatura" é o valor oficial do banco
+// (inclui juros, IOF e outros encargos que não aparecem como transação).
 function updateMetrics() {
-  const debitos  = allTx.filter(t => t.tipo==='debito').reduce((s,t) => s+Math.abs(t.valor), 0);
-  const creditos = allTx.filter(t => t.tipo==='credito').reduce((s,t) => s+Math.abs(t.valor), 0);
-  document.getElementById('m-total').textContent    = fmtVal(debitos - creditos);
+  const ff     = (document.getElementById('ffatura') || {}).value || '';
+  const fatura = ff ? faturas.find(f => f.id === ff) : null;
+  const base   = ff ? allTx.filter(t => t.faturaId === ff) : allTx;
+
+  const debitos  = base.filter(t => t.tipo==='debito').reduce((s,t) => s+Math.abs(t.valor), 0);
+  const creditos = base.filter(t => t.tipo==='credito').reduce((s,t) => s+Math.abs(t.valor), 0);
+  // Sem filtro: soma dos totais oficiais de todas as faturas importadas.
+  const oficiais = fatura ? [fatura] : faturas;
+  const total    = oficiais.length && oficiais.every(f => f.total)
+    ? oficiais.reduce((s, f) => s + f.total, 0)
+    : debitos - creditos;
+  document.getElementById('m-total').textContent    = fmtVal(total);
   document.getElementById('m-debitos').textContent  = fmtVal(debitos);
   document.getElementById('m-creditos').textContent = fmtVal(creditos);
-  document.getElementById('m-parcels').textContent  = allTx.filter(t => t.parcela).length;
-  document.getElementById('m-count').textContent    = allTx.length;
+  document.getElementById('m-parcels').textContent  = base.filter(t => t.parcela).length;
+  document.getElementById('m-count').textContent    = base.length;
 }
 
 function updateFaturaFilter() {
-  const sel = document.getElementById('ffatura');
+  const sel  = document.getElementById('ffatura');
+  const prev = sel.value;
   sel.innerHTML = '<option value="">Todas as faturas</option>' +
     faturas.map(f => `<option value="${f.id}">${f.id.replace('.csv','')}</option>`).join('');
+  if (faturas.some(f => f.id === prev)) sel.value = prev;
 }
 
 function exportCSV() {
