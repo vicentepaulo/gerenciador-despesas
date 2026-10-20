@@ -66,7 +66,7 @@ function dashMovimentos() {
 
 // Meses do período escolhido, do mais antigo ao mais recente.
 function dashMeses(movs) {
-  const comDados = movs.map(m => m.mes).sort();
+  const comDados = [...movs.map(m => m.mes), ...investimentos.map(i => i.data.slice(0, 7))].sort();
   if (!comDados.length) return [];
   const fim    = [mesAtual(), comDados[comDados.length - 1]].sort().pop();
   let inicio;
@@ -79,6 +79,27 @@ function dashMeses(movs) {
 }
 
 function soma(lista) { return lista.reduce((s, x) => s + x.valor, 0); }
+
+// ---------- INVESTIMENTOS ----------
+// Aportes não contam como gasto: aparecem à parte, como destino do que sobrou.
+
+function invDoMes(mes) {
+  return investimentos.filter(i => i.data.slice(0, 7) === mes);
+}
+
+function invPatrimonioAte(mes) {
+  return invSaldo(investimentos.filter(i => i.data.slice(0, 7) <= mes));
+}
+
+function invResumo(meses) {
+  const lista = investimentos.filter(i => meses.includes(i.data.slice(0, 7)));
+  return {
+    aportes:     invSoma(lista, 'aporte'),
+    resgates:    invSoma(lista, 'resgate'),
+    rendimentos: invSoma(lista, 'rendimento'),
+    patrimonio:  invPatrimonioAte(meses[meses.length - 1]),
+  };
+}
 
 // Aplica o filtro de categoria às saídas (entradas não têm categoria de saída).
 function filtraCat(movs) {
@@ -220,7 +241,7 @@ function renderDashboard() {
   if (!tab || !tab.classList.contains('active')) return;
 
   const movs  = dashMovimentos();
-  const vazio = !movs.length;
+  const vazio = !movs.length && !investimentos.length;
   document.getElementById('dash-empty').style.display = vazio ? '' : 'none';
   document.getElementById('dash-body').style.display  = vazio ? 'none' : '';
   if (vazio) return;
@@ -246,6 +267,7 @@ function renderDashboard() {
       renderBarrasH('ent', agrupa(escopo, 'ent'), '--viz-ent', 'Entradas', {});
       renderAcumulado(linhas);
       renderTop(mesesEscopo);
+      renderCarteira(meses);
       renderPrevisao();
     })
     .catch(() => {
@@ -303,6 +325,23 @@ function renderKpis(movs, meses, mesesEscopo) {
     { label: 'Peso do cartão nas saídas', valor: a.pesoCartao === null ? '—' : fmtPct(a.pesoCartao), cor: 'blue',
       d: delta(a.pesoCartao, b.pesoCartao, false, true) },
   ];
+
+  // Investimentos: não entram em saídas/resultado. Comparação só se havia carteira antes.
+  const invA = invResumo(mesesEscopo);
+  const invB = invResumo(anteriores);
+  const temInvAntes = investimentos.some(i => i.data.slice(0, 7) <= anteriores[anteriores.length - 1]);
+  const deltaInv = (atual, ant) => {
+    if (!temInvAntes || !ant) return { txt: 'sem período anterior', cls: '' };
+    const d = (atual - ant) / Math.abs(ant);
+    if (Math.abs(d) < 0.005) return { txt: '= igual ao período anterior', cls: '' };
+    return { txt: `${d > 0 ? '▲' : '▼'} ${fmtPct(Math.abs(d))} vs anterior`, cls: d > 0 ? 'bom' : 'ruim' };
+  };
+  kpis.push(
+    { label: 'Investido no período', valor: fmtVal(invA.aportes), cor: 'purple',
+      d: invA.resgates ? { txt: `${fmtVal(invA.resgates)} resgatados`, cls: '' } : deltaInv(invA.aportes, invB.aportes) },
+    { label: 'Patrimônio investido', valor: fmtVal(invA.patrimonio), cor: 'purple',
+      d: invA.rendimentos ? { txt: `+ ${fmtVal(invA.rendimentos)} de rendimentos`, cls: 'bom' } : deltaInv(invA.patrimonio, invB.patrimonio) },
+  );
 
   document.getElementById('dash-kpis').innerHTML = kpis.map(k => `
     <div class="metric">
@@ -373,6 +412,18 @@ function renderInsights(movs, meses, mesesEscopo, linhas) {
       ` (${fmtVal(parcelas[proximos[0]])} em ${mesAnoLabel(proximos[0])}${peso}).`);
   }
 
+  // 7. Investimentos no período
+  const inv = invResumo(mesesEscopo);
+  if (inv.aportes > 0 || inv.rendimentos > 0) {
+    const res = ent - sai;
+    let txt = `Você investiu ${fmtVal(inv.aportes)} em ${escopo}`;
+    if (inv.aportes > 0 && res > 0) txt += ` — ${fmtPct(Math.min(inv.aportes / res, 9.99))} do que sobrou`;
+    else if (inv.aportes > 0 && ent > 0) txt += ` (${fmtPct(inv.aportes / ent)} das entradas)`;
+    txt += `. Patrimônio investido: ${fmtVal(inv.patrimonio)}`;
+    if (inv.rendimentos > 0) txt += `, com ${fmtVal(inv.rendimentos)} de rendimentos no período`;
+    add('💰', txt + '.');
+  }
+
   if (dash.cat) add('🔎', 'Filtro de categoria ativo: saídas, resultado e gráficos mostram só essa categoria.');
 
   const ul = document.getElementById('dash-insights');
@@ -404,6 +455,8 @@ function renderTabela(linhas) {
     cel(fmtVal(l.outras));
     cel(fmtVal(l.res), l.res >= 0 ? 'pos' : 'neg');
     cel(fmtVal(acum), acum >= 0 ? 'pos' : 'neg');
+    cel(fmtVal(invSoma(invDoMes(l.mes), 'aporte')));
+    cel(fmtVal(invPatrimonioAte(l.mes)));
     body.prepend(tr);  // mais recente no topo
   });
 }
@@ -578,6 +631,56 @@ function renderTop(mesesEscopo) {
     dashCharts.top.options.plugins.tooltip.callbacks.label =
       ctx => ` ${fmtVal(ctx.parsed.x)}  ·  ${top[ctx.dataIndex].qtd} ${top[ctx.dataIndex].qtd === 1 ? 'compra' : 'compras'}`;
   }
+}
+
+// Evolução da carteira: patrimônio no fim de cada mês (linha) e aportes do mês (barras).
+// Um só eixo em R$; cor própria (violeta), nunca no mesmo gráfico que o azul das entradas.
+function renderCarteira(meses) {
+  const holder = document.getElementById('dash-h-inv');
+  if (!investimentos.length) {
+    if (dashCharts.inv) { dashCharts.inv.destroy(); delete dashCharts.inv; }
+    holder.style.height = '';
+    holder.innerHTML = '<div class="dash-msg">Cadastre aportes e rendimentos na aba Investimentos para ver a evolução da carteira.</div>';
+    return;
+  }
+  if (!holder.querySelector('canvas')) {
+    holder.innerHTML = '<canvas id="dash-c-inv" role="img" aria-label="Evolução do patrimônio investido"></canvas>';
+  }
+  holder.style.height = '260px';
+
+  const c = cssVar('--viz-inv');
+  const patrimonio = meses.map(invPatrimonioAte);
+  const aportes    = meses.map(m => invSoma(invDoMes(m), 'aporte'));
+  const rendim     = meses.map(m => invSoma(invDoMes(m), 'rendimento'));
+  // Barras em tom claro do violeta; meses fora do filtro ficam ainda mais claros.
+  const corBarra   = i => comAlpha(c, !dash.mes || meses[i] === dash.mes ? 0.45 : 0.12);
+
+  const opts = baseOpts();
+  opts.interaction = { mode: 'index', intersect: false };
+  opts.onClick = (evt, els, chart) => {
+    const pts = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, false);
+    if (pts.length) dashToggleMes(meses[pts[0].index]);
+  };
+  opts.plugins.tooltip.callbacks.footer = items => {
+    const r = rendim[items[0].dataIndex];
+    return r ? `Rendimentos no mês: ${fmtVal(r)}` : '';
+  };
+
+  novoGrafico('inv', {
+    type: 'bar',
+    data: {
+      labels: meses.map(mesCurto),
+      datasets: [
+        { label: 'Aportes do mês', data: aportes, order: 1, ...barra(comAlpha(c, 0.45)), legendColor: comAlpha(c, 0.45),
+          backgroundColor: aportes.map((_, i) => corBarra(i)) },
+        { type: 'line', label: 'Patrimônio', data: patrimonio, order: 0,
+          borderColor: c, backgroundColor: c, borderWidth: 2, tension: 0,
+          pointRadius: meses.map(m => !dash.mes || m === dash.mes ? 4 : 2), pointHoverRadius: 6,
+          pointBackgroundColor: c, pointBorderColor: cssVar('--bg1'), pointBorderWidth: 2 },
+      ],
+    },
+    options: { ...opts, datasets: { bar: { categoryPercentage: 0.6, barPercentage: 0.9 } } },
+  });
 }
 
 function renderPrevisao() {

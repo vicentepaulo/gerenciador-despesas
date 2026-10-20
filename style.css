@@ -235,6 +235,7 @@ body {
 .metric-value.red    { color: var(--red); }
 .metric-value.blue   { color: var(--blue); }
 .metric-value.amber  { color: var(--amber); }
+.metric-value.purple { color: var(--purple-text); }
 
 /* ---------- FILTERS ---------- */
 .filter-row {
@@ -584,6 +585,7 @@ tr.quitado td    { opacity: .5; }
   --viz-ent:   #2a78d6;
   --viz-sai:   #eb6834;
   --viz-saldo: #1baf7a;
+  --viz-inv:   #6250d6;
   --viz-grid:  #eceef3;
   --viz-axis:  #c8ccd8;
 }
@@ -591,6 +593,7 @@ tr.quitado td    { opacity: .5; }
   --viz-ent:   #3987e5;
   --viz-sai:   #d95926;
   --viz-saldo: #199e70;
+  --viz-inv:   #9085e9;
   --viz-grid:  #232b3e;
   --viz-axis:  #364060;
 }
@@ -612,7 +615,7 @@ tr.quitado td    { opacity: .5; }
 }
 .dash-chip:hover .x { background: var(--red-bg); color: var(--red-text); }
 
-.dash-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.dash-kpis { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
 .dash-kpi-delta { font-size: 11px; margin-top: 4px; color: var(--muted); white-space: nowrap; }
 .dash-kpi-delta.bom  { color: var(--green-text); }
 .dash-kpi-delta.ruim { color: var(--red-text); }
@@ -643,6 +646,9 @@ tr.quitado td    { opacity: .5; }
 
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ============================================

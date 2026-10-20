@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sicredi Faturas</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -117,6 +117,14 @@
 
           <div class="card dash-card dash-wide">
             <div class="dash-card-head">
+              <div class="dash-card-title">Evolução da carteira</div>
+              <div class="dash-card-sub">Patrimônio investido no fim de cada mês e aportes do mês · aportes não contam como gasto</div>
+            </div>
+            <div class="dash-chart" id="dash-h-inv" style="height:260px"><canvas id="dash-c-inv" role="img" aria-label="Evolução do patrimônio investido"></canvas></div>
+          </div>
+
+          <div class="card dash-card dash-wide">
+            <div class="dash-card-head">
               <div class="dash-card-title">Próximos meses</div>
               <div class="dash-card-sub">Entradas previstas × parcelas do cartão já comprometidas · não muda com os filtros</div>
             </div>
@@ -131,7 +139,7 @@
             <div class="table-wrap">
               <table class="dash-table">
                 <thead>
-                  <tr><th>Mês</th><th>Entradas</th><th>Cartão</th><th>Outras saídas</th><th>Resultado</th><th>Acumulado</th></tr>
+                  <tr><th>Mês</th><th>Entradas</th><th>Cartão</th><th>Outras saídas</th><th>Resultado</th><th>Acumulado</th><th>Investido</th><th>Patrimônio</th></tr>
                 </thead>
                 <tbody id="dash-table-body"></tbody>
               </table>
@@ -940,7 +948,7 @@
 </div>
 <!-- /app-shell -->
 
-<script src="app.js?v=9"></script>
-<script src="dashboard.js?v=9"></script>
+<script src="app.js?v=10"></script>
+<script src="dashboard.js?v=10"></script>
 </body>
 </html>
