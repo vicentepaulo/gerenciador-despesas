@@ -185,7 +185,8 @@
             <input type="date" class="pill form-input" id="en-data">
           </div>
           <div class="form-group form-actions">
-            <button class="btn btn-primary" onclick="addEntrada()">Adicionar entrada</button>
+            <button class="btn btn-primary" id="en-submit" onclick="addEntrada()">Adicionar entrada</button>
+            <button class="btn" id="en-cancel" onclick="cancelEdit('en')" style="display:none">Cancelar</button>
           </div>
         </div>
         <div id="en-error" class="form-error" style="display:none"></div>
@@ -308,7 +309,8 @@
             <input type="month" class="pill form-input" id="fut-mes">
           </div>
           <div class="form-group form-actions">
-            <button class="btn btn-primary" onclick="addEntradaFutura()">Adicionar</button>
+            <button class="btn btn-primary" id="fut-submit" onclick="addEntradaFutura()">Adicionar</button>
+            <button class="btn" id="fut-cancel" onclick="cancelEdit('fut')" style="display:none">Cancelar</button>
           </div>
         </div>
         <div id="fut-error" class="form-error" style="display:none"></div>
@@ -419,7 +421,8 @@
             <input type="date" class="pill form-input" id="sd-data">
           </div>
           <div class="form-group form-actions">
-            <button class="btn btn-primary" onclick="addSaida()">Adicionar saída</button>
+            <button class="btn btn-primary" id="sd-submit" onclick="addSaida()">Adicionar saída</button>
+            <button class="btn" id="sd-cancel" onclick="cancelEdit('sd')" style="display:none">Cancelar</button>
           </div>
         </div>
         <div id="sd-error" class="form-error" style="display:none"></div>

@@ -644,7 +644,51 @@ function exportCSV() {
   a.click();
 }
 
+// ---------- EDIÇÃO ----------
+// Editar carrega o item no formulário de cadastro da própria aba (prefixos
+// en / fut / sd); o botão "Adicionar" vira "Salvar alteração" até salvar ou cancelar.
+
+const editing = { en: null, fut: null, sd: null };
+const SUBMIT_LABELS = { en: 'Adicionar entrada', fut: 'Adicionar', sd: 'Adicionar saída' };
+
+function setEditMode(prefix, id) {
+  editing[prefix] = id;
+  document.getElementById(prefix + '-submit').textContent = id === null ? SUBMIT_LABELS[prefix] : 'Salvar alteração';
+  document.getElementById(prefix + '-cancel').style.display = id === null ? 'none' : '';
+}
+
+function startEdit(prefix, item) {
+  document.getElementById(prefix + '-desc').value  = item.desc;
+  document.getElementById(prefix + '-tipo').value  = item.tipo;
+  document.getElementById(prefix + '-valor').value = item.valor.toFixed(2).replace('.', ',');
+  if (prefix === 'fut') document.getElementById('fut-mes').value = item.mesAno;
+  else document.getElementById(prefix + '-data').value = item.data;
+  document.getElementById(prefix + '-error').style.display = 'none';
+  setEditMode(prefix, item.id);
+  const descEl = document.getElementById(prefix + '-desc');
+  descEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  descEl.focus({ preventScroll: true });
+}
+
+// Limpa o formulário e sai do modo de edição (também usado após salvar).
+function cancelEdit(prefix) {
+  document.getElementById(prefix + '-desc').value  = '';
+  document.getElementById(prefix + '-valor').value = '';
+  if (prefix !== 'fut') document.getElementById(prefix + '-data').value = todayISO();
+  document.getElementById(prefix + '-error').style.display = 'none';
+  setEditMode(prefix, null);
+}
+
+function editBtn(fn, id) {
+  return `<button class="btn-delete btn-edit" onclick="${fn}(${id})" title="Editar">✎</button>`;
+}
+
 // ---------- ENTRADAS ----------
+
+function editEntrada(id) {
+  const e = entradas.find(x => x.id === id);
+  if (e) startEdit('en', e);
+}
 
 function addEntrada() {
   const desc  = (document.getElementById('en-desc').value || '').trim();
@@ -657,18 +701,18 @@ function addEntrada() {
   if (valor <= 0) { showEnError('Informe um valor maior que zero.'); return; }
   errEl.style.display = 'none';
 
-  entradas.push({ id: Date.now(), desc, tipo, valor, data });
+  const editId = editing.en;
+  if (editId !== null) Object.assign(entradas.find(e => e.id === editId) || {}, { desc, tipo, valor, data });
+  else entradas.push({ id: Date.now(), desc, tipo, valor, data });
   saveAll();
   updateEnMetrics();
   renderEntradas();
   renderEnMensal();
   updateSaidaMetrics();
 
-  document.getElementById('en-desc').value  = '';
-  document.getElementById('en-valor').value = '';
-  document.getElementById('en-data').value  = todayISO();
+  cancelEdit('en');
   document.getElementById('en-desc').focus();
-  showToast('Entrada adicionada ✓', 'ok', 2000);
+  showToast(editId !== null ? 'Entrada atualizada ✓' : 'Entrada adicionada ✓', 'ok', 2000);
 }
 
 function showEnError(msg) {
@@ -680,6 +724,7 @@ function showEnError(msg) {
 function deleteEntrada(id) {
   if (!confirm('Excluir esta entrada?')) return;
   entradas = entradas.filter(e => e.id !== id);
+  if (editing.en === id) cancelEdit('en');
   saveAll();
   updateEnMetrics();
   renderEntradas();
@@ -806,7 +851,7 @@ function renderEntradas() {
 
   document.getElementById('en-head').innerHTML =
     thEn('data','Data') + thEn('desc','Descrição') + thEn('tipo','Tipo') +
-    thEn('valor','Valor') + '<th style="width:44px"></th>';
+    thEn('valor','Valor') + '<th style="width:80px"></th>';
 
   const body = document.getElementById('en-body');
   if (!list.length) {
@@ -824,7 +869,8 @@ function renderEntradas() {
       <td>${e.desc}</td>
       <td><span class="badge b-tipo-${e.tipo}">${TIPO_LABELS[e.tipo]||e.tipo}</span></td>
       <td style="font-weight:500;color:var(--green);white-space:nowrap">${fmtVal(e.valor)}</td>
-      <td style="text-align:center">
+      <td style="text-align:center;white-space:nowrap">
+        ${editBtn('editEntrada', e.id)}
         <button class="btn-delete" onclick="deleteEntrada(${e.id})" title="Excluir">✕</button>
       </td>
     </tr>`).join('');
@@ -886,14 +932,20 @@ function addEntradaFutura() {
   if (valor <= 0) { showFutError('Informe um valor maior que zero.'); return; }
   document.getElementById('fut-error').style.display = 'none';
 
-  entradasFuturas.push({ id: Date.now(), desc, tipo, valor, mesAno: mes });
+  const editId = editing.fut;
+  if (editId !== null) Object.assign(entradasFuturas.find(e => e.id === editId) || {}, { desc, tipo, valor, mesAno: mes });
+  else entradasFuturas.push({ id: Date.now(), desc, tipo, valor, mesAno: mes });
   saveAll();
   renderEntradasFuturas();
 
-  document.getElementById('fut-desc').value  = '';
-  document.getElementById('fut-valor').value = '';
+  cancelEdit('fut');
   document.getElementById('fut-desc').focus();
-  showToast('Entrada futura adicionada ✓', 'ok', 2000);
+  showToast(editId !== null ? 'Entrada futura atualizada ✓' : 'Entrada futura adicionada ✓', 'ok', 2000);
+}
+
+function editEntradaFutura(id) {
+  const e = entradasFuturas.find(x => x.id === id);
+  if (e) startEdit('fut', e);
 }
 
 function showFutError(msg) {
@@ -905,6 +957,7 @@ function showFutError(msg) {
 function deleteEntradaFutura(id) {
   if (!confirm('Excluir esta entrada futura?')) return;
   entradasFuturas = entradasFuturas.filter(e => e.id !== id);
+  if (editing.fut === id) cancelEdit('fut');
   saveAll();
   renderEntradasFuturas();
 }
@@ -978,7 +1031,7 @@ function renderEntradasFuturas() {
 
   document.getElementById('fut-head').innerHTML =
     thFut('mes','Mês') + thFut('desc','Descrição') + thFut('tipo','Tipo') +
-    thFut('valor','Valor') + '<th style="width:44px"></th>';
+    thFut('valor','Valor') + '<th style="width:80px"></th>';
 
   const body = document.getElementById('fut-body');
   if (!list.length) {
@@ -994,7 +1047,8 @@ function renderEntradasFuturas() {
         <td>${e.desc}</td>
         <td><span class="badge b-tipo-${e.tipo}">${TIPO_LABELS[e.tipo]||e.tipo}</span></td>
         <td style="font-weight:500;color:var(--green);white-space:nowrap">${fmtVal(e.valor)}</td>
-        <td style="text-align:center">
+        <td style="text-align:center;white-space:nowrap">
+          ${editBtn('editEntradaFutura', e.id)}
           <button class="btn-delete" onclick="deleteEntradaFutura(${e.id})" title="Excluir">✕</button>
         </td>
       </tr>`).join('');
@@ -1057,18 +1111,23 @@ function addSaida() {
   if (valor <= 0) { showSdError('Informe um valor maior que zero.'); return; }
   document.getElementById('sd-error').style.display = 'none';
 
-  saidas.push({ id: Date.now(), desc, tipo, valor, data });
+  const editId = editing.sd;
+  if (editId !== null) Object.assign(saidas.find(s => s.id === editId) || {}, { desc, tipo, valor, data });
+  else saidas.push({ id: Date.now(), desc, tipo, valor, data });
   saveAll();
   updateSaidaMetrics();
   renderSaidas();
   renderSdMensal();
   updateEnMetrics(); // saldo da aba Entradas também depende das saídas
 
-  document.getElementById('sd-desc').value  = '';
-  document.getElementById('sd-valor').value = '';
-  document.getElementById('sd-data').value  = todayISO();
+  cancelEdit('sd');
   document.getElementById('sd-desc').focus();
-  showToast('Saída adicionada ✓', 'ok', 2000);
+  showToast(editId !== null ? 'Saída atualizada ✓' : 'Saída adicionada ✓', 'ok', 2000);
+}
+
+function editSaida(id) {
+  const s = saidas.find(x => x.id === id);
+  if (s) startEdit('sd', s);
 }
 
 function showSdError(msg) {
@@ -1080,6 +1139,7 @@ function showSdError(msg) {
 function deleteSaida(id) {
   if (!confirm('Excluir esta saída?')) return;
   saidas = saidas.filter(s => s.id !== id);
+  if (editing.sd === id) cancelEdit('sd');
   saveAll();
   updateSaidaMetrics();
   renderSaidas();
@@ -1201,7 +1261,7 @@ function renderSaidas() {
 
   document.getElementById('sd-head').innerHTML =
     thSd('data','Data') + thSd('desc','Descrição') + thSd('tipo','Categoria') +
-    thSd('valor','Valor') + '<th style="width:44px"></th>';
+    thSd('valor','Valor') + '<th style="width:80px"></th>';
 
   const body = document.getElementById('sd-body');
   if (!list.length) {
@@ -1219,7 +1279,8 @@ function renderSaidas() {
       <td>${s.desc}</td>
       <td><span class="badge b-cat-${s.tipo}">${SAIDA_LABELS[s.tipo]||s.tipo}</span></td>
       <td style="font-weight:500;color:var(--red);white-space:nowrap">${fmtVal(s.valor)}</td>
-      <td style="text-align:center">
+      <td style="text-align:center;white-space:nowrap">
+        ${editBtn('editSaida', s.id)}
         <button class="btn-delete" onclick="deleteSaida(${s.id})" title="Excluir">✕</button>
       </td>
     </tr>`).join('');

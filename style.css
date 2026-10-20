@@ -477,7 +477,7 @@ tr.quitado td    { opacity: .5; }
 .form-group { display: flex; flex-direction: column; gap: 4px; }
 .form-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .form-input { width: 100%; }
-.form-actions { display: flex; align-items: flex-end; }
+.form-actions { display: flex; align-items: flex-end; gap: 6px; }
 
 .form-error {
   margin-top: 10px;
@@ -499,6 +499,7 @@ tr.quitado td    { opacity: .5; }
   min-width: 32px; min-height: 32px;
 }
 .btn-delete:hover { background: var(--red-bg); color: var(--red-text); }
+.btn-edit:hover   { background: var(--bg2); color: var(--accent-text); }
 
 /* ---------- TIPO BADGES ---------- */
 .b-tipo-salario          { background: #E1F5EE; color: #085041; }
