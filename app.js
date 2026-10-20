@@ -42,6 +42,25 @@ const SAIDA_LABELS = {
 const SAIDA_FIXAS     = ['moradia', 'contas', 'educacao'];
 const SAIDA_VARIAVEIS = ['mercado', 'transporte', 'saude', 'lazer'];
 
+const INV_TIPO_LABELS = {
+  renda_fixa:  'CDB / LCI / LCA',
+  tesouro:     'Tesouro Direto',
+  poupanca:    'Poupança',
+  acoes:       'Ações',
+  fiis:        'Fundos imobiliários (FIIs)',
+  fundos:      'Fundos de investimento',
+  cripto:      'Criptomoedas',
+  previdencia: 'Previdência',
+  outros:      'Outros',
+};
+
+// Operação → rótulo, badge e sinal no saldo do investimento.
+const INV_OPS = {
+  aporte:     { label: 'Aporte',     badge: 'b-blue',  sinal:  1 },
+  resgate:    { label: 'Resgate',    badge: 'b-amber', sinal: -1 },
+  rendimento: { label: 'Rendimento', badge: 'b-green', sinal:  1 },
+};
+
 const MES_LABELS = [
   'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
   'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'
@@ -56,6 +75,7 @@ let statusOverride = {};
 let entradas       = [];
 let entradasFuturas = [];
 let saidas          = [];
+let investimentos   = [];
 let theme           = 'light';
 
 let txSort      = { col: null, dir: null };
@@ -63,6 +83,7 @@ let installSort = { col: null, dir: null };
 let entSort     = { col: null, dir: null };
 let futSort     = { col: null, dir: null };
 let sdSort      = { col: null, dir: null };
+let invSort     = { col: null, dir: null };
 
 // ---------- PERSISTENCE (localStorage) ----------
 // Todos os dados ficam salvos no localStorage do navegador.
@@ -71,7 +92,7 @@ const STORAGE_KEY = 'sicredi_dados';
 let _saveTimer = null;
 
 function saveAll() {
-  const payload = { allTx, faturas, statusOverride, entradas, entradasFuturas, saidas, theme };
+  const payload = { allTx, faturas, statusOverride, entradas, entradasFuturas, saidas, investimentos, theme };
   // debounce: espera 400ms de silêncio antes de salvar
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
@@ -91,6 +112,7 @@ function loadAll() {
       entradas        = data.entradas        || [];
       entradasFuturas = data.entradasFuturas || [];
       saidas          = data.saidas          || [];
+      investimentos   = data.investimentos   || [];
       if (data.theme) applyTheme(data.theme, true);
     }
   } catch (_) {}
@@ -112,6 +134,11 @@ function afterLoad() {
   if (futMesInput) futMesInput.value = todayISO().slice(0, 7);
   const sdDataInput = document.getElementById('sd-data');
   if (sdDataInput) sdDataInput.value = todayISO();
+  const invDataInput = document.getElementById('inv-data');
+  if (invDataInput) invDataInput.value = todayISO();
+  updateInvMetrics();
+  renderInvMensal();
+  renderInvestimentos();
 }
 
 // ---------- TOAST ----------
@@ -226,6 +253,7 @@ function switchTab(name, btn) {
   if (name === 'entradas')      { renderEntradas(); renderEnMensal(); }
   if (name === 'futuras')       renderEntradasFuturas();
   if (name === 'saidas')        { renderSaidas(); renderSdMensal(); }
+  if (name === 'investimentos') { updateInvMetrics(); renderInvMensal(); renderInvestimentos(); }
   if (name === 'transacoes')    renderTx();
   if (name === 'parcelamentos') renderInstall();
   if (name === 'faturas')       renderFaturas();
@@ -853,8 +881,8 @@ function exportCSV() {
 // Editar carrega o item no formulário de cadastro da própria aba (prefixos
 // en / fut / sd); o botão "Adicionar" vira "Salvar alteração" até salvar ou cancelar.
 
-const editing = { en: null, fut: null, sd: null };
-const SUBMIT_LABELS = { en: 'Adicionar entrada', fut: 'Adicionar', sd: 'Adicionar saída' };
+const editing = { en: null, fut: null, sd: null, inv: null };
+const SUBMIT_LABELS = { en: 'Adicionar entrada', fut: 'Adicionar', sd: 'Adicionar saída', inv: 'Adicionar' };
 
 function setEditMode(prefix, id) {
   editing[prefix] = id;
@@ -866,6 +894,7 @@ function startEdit(prefix, item) {
   document.getElementById(prefix + '-desc').value  = item.desc;
   document.getElementById(prefix + '-tipo').value  = item.tipo;
   document.getElementById(prefix + '-valor').value = item.valor.toFixed(2).replace('.', ',');
+  if (item.op) document.getElementById(prefix + '-op').value = item.op;
   if (prefix === 'fut') document.getElementById('fut-mes').value = item.mesAno;
   else document.getElementById(prefix + '-data').value = item.data;
   document.getElementById(prefix + '-error').style.display = 'none';
@@ -1671,6 +1700,333 @@ function importSaidasJSON(event) {
       renderSdMensal();
       updateEnMetrics();
       showToast(`${added} saída(s) importada(s) ✓`, 'ok', 3000);
+    } catch (_) {
+      showToast('Erro ao ler o arquivo JSON', 'warn', 4000);
+    }
+  };
+  rd.readAsText(file);
+  event.target.value = '';
+}
+
+// ---------- INVESTIMENTOS ----------
+// Cada lançamento é uma operação (aporte, resgate ou rendimento) em um investimento
+// identificado pela descrição. Saldo = aportes − resgates + rendimentos.
+
+function invSaldo(lista) {
+  return lista.reduce((s, i) => s + INV_OPS[i.op].sinal * i.valor, 0);
+}
+
+function invSoma(lista, op) {
+  return lista.filter(i => i.op === op).reduce((s, i) => s + i.valor, 0);
+}
+
+function addInvestimento() {
+  const desc  = (document.getElementById('inv-desc').value || '').trim();
+  const tipo  = document.getElementById('inv-tipo').value;
+  const op    = document.getElementById('inv-op').value;
+  const valor = parseCurrencyInput(document.getElementById('inv-valor').value);
+  const data  = document.getElementById('inv-data').value || todayISO();
+
+  if (!desc)      { showInvError('Informe o investimento.'); return; }
+  if (valor <= 0) { showInvError('Informe um valor maior que zero.'); return; }
+  document.getElementById('inv-error').style.display = 'none';
+
+  const editId = editing.inv;
+  if (editId !== null) Object.assign(investimentos.find(i => i.id === editId) || {}, { desc, tipo, op, valor, data });
+  else investimentos.push({ id: Date.now(), desc, tipo, op, valor, data });
+  saveAll();
+  updateInvMetrics();
+  renderInvMensal();
+  renderInvestimentos();
+
+  cancelEdit('inv');
+  document.getElementById('inv-desc').focus();
+  showToast(editId !== null ? 'Lançamento atualizado ✓' : `${INV_OPS[op].label} adicionado ✓`, 'ok', 2000);
+}
+
+function editInvestimento(id) {
+  const i = investimentos.find(x => x.id === id);
+  if (i) startEdit('inv', i);
+}
+
+function showInvError(msg) {
+  const el = document.getElementById('inv-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function deleteInvestimento(id) {
+  if (!confirm('Excluir este lançamento?')) return;
+  investimentos = investimentos.filter(i => i.id !== id);
+  if (editing.inv === id) cancelEdit('inv');
+  saveAll();
+  updateInvMetrics();
+  renderInvMensal();
+  renderInvestimentos();
+}
+
+// Ao digitar o nome de um investimento já cadastrado, preenche o tipo dele.
+function invSugerirTipo() {
+  const desc = (document.getElementById('inv-desc').value || '').trim().toLowerCase();
+  const ultimo = [...investimentos].reverse().find(i => i.desc.toLowerCase() === desc);
+  if (ultimo && editing.inv === null) document.getElementById('inv-tipo').value = ultimo.tipo;
+}
+
+function updateInvMetrics() {
+  const patrEl = document.getElementById('inv-patrimonio');
+  if (!patrEl) return;
+
+  const mesFiltro = (document.getElementById('inv-filter-mes') || {}).value || '';
+  const base = mesFiltro ? investimentos.filter(i => i.data.slice(0,7) === mesFiltro) : investimentos;
+  // Patrimônio é acumulado: com mês filtrado, mostra a posição no fim daquele mês.
+  const ateMes = mesFiltro ? investimentos.filter(i => i.data.slice(0,7) <= mesFiltro) : investimentos;
+
+  const aportes     = invSoma(base, 'aporte');
+  const resgates    = invSoma(base, 'resgate');
+  const rendimentos = invSoma(base, 'rendimento');
+  const patrimonio  = invSaldo(ateMes);
+  const aportadoLiq = invSoma(ateMes, 'aporte') - invSoma(ateMes, 'resgate');
+  const rendTotal   = invSoma(ateMes, 'rendimento');
+
+  document.getElementById('inv-patrimonio-label').textContent =
+    mesFiltro ? `Patrimônio no fim de ${mesAnoLabel(mesFiltro)}` : 'Patrimônio investido';
+  patrEl.textContent = fmtVal(patrimonio);
+  document.getElementById('inv-aportes').textContent     = fmtVal(aportes);
+  document.getElementById('inv-resgates').textContent    = fmtVal(resgates);
+  document.getElementById('inv-rendimentos').textContent = fmtVal(rendimentos);
+  document.getElementById('inv-rentab').textContent = aportadoLiq > 0
+    ? (rendTotal / aportadoLiq * 100).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + '%'
+    : '—';
+}
+
+function renderInvCarteira() {
+  const body = document.getElementById('inv-carteira-body');
+  if (!body) return;
+
+  const map = {};
+  investimentos.forEach(i => {
+    const k = i.desc.trim().toLowerCase();
+    if (!map[k]) map[k] = { desc: i.desc.trim(), tipo: i.tipo, itens: [] };
+    map[k].itens.push(i);
+    map[k].tipo = i.tipo;  // vale o tipo do lançamento mais recente
+  });
+  const ativos = Object.values(map).map(a => ({
+    ...a,
+    aportado:    invSoma(a.itens, 'aporte'),
+    resgatado:   invSoma(a.itens, 'resgate'),
+    rendimentos: invSoma(a.itens, 'rendimento'),
+    saldo:       invSaldo(a.itens),
+  })).sort((a, b) => b.saldo - a.saldo);
+
+  const total = ativos.reduce((s, a) => s + Math.max(a.saldo, 0), 0);
+  body.textContent = '';
+  const table = body.closest('table');
+  const oldFoot = table.querySelector('tfoot');
+  if (oldFoot) oldFoot.remove();
+
+  if (!ativos.length) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:1.25rem;color:var(--muted);font-size:13px">Nenhum investimento cadastrado</td></tr>`;
+    return;
+  }
+
+  const linha = (cells, tag = 'td') => {
+    const tr = document.createElement('tr');
+    cells.forEach(([txt, style]) => {
+      const td = document.createElement(tag);
+      td.textContent = txt;
+      if (style) td.style.cssText = style;
+      tr.append(td);
+    });
+    return tr;
+  };
+  ativos.forEach(a => {
+    const tr = linha([
+      [a.desc, 'font-weight:500'],
+      [INV_TIPO_LABELS[a.tipo] || a.tipo, 'color:var(--muted);font-size:12px'],
+      [fmtVal(a.aportado)],
+      [fmtVal(a.resgatado), 'color:var(--muted)'],
+      [fmtVal(a.rendimentos), 'color:var(--green)'],
+      [fmtVal(a.saldo), 'font-weight:600;color:var(--blue)'],
+      [total > 0 && a.saldo > 0 ? (a.saldo / total * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%' : '—', 'color:var(--muted)'],
+    ]);
+    tr.style.cursor = 'pointer';
+    tr.title = `Ver lançamentos de ${a.desc}`;
+    tr.onclick = () => { document.getElementById('inv-search').value = a.desc; renderInvestimentos(); };
+    body.append(tr);
+  });
+
+  const tfoot = document.createElement('tfoot');
+  tfoot.append(linha([
+    ['Total'], [''],
+    [fmtVal(ativos.reduce((s, a) => s + a.aportado, 0))],
+    [fmtVal(ativos.reduce((s, a) => s + a.resgatado, 0))],
+    [fmtVal(ativos.reduce((s, a) => s + a.rendimentos, 0)), 'color:var(--green)'],
+    [fmtVal(ativos.reduce((s, a) => s + a.saldo, 0)), 'color:var(--blue)'],
+    ['100%'],
+  ]));
+  table.append(tfoot);
+
+  // Sugestões no campo "Investimento" com os nomes já usados.
+  const dl = document.getElementById('inv-ativos');
+  dl.textContent = '';
+  ativos.forEach(a => { const o = document.createElement('option'); o.value = a.desc; dl.append(o); });
+}
+
+function renderInvMensal() {
+  const el = document.getElementById('inv-mensal-body');
+  if (!el) return;
+
+  const map = {};
+  investimentos.forEach(i => {
+    const k = i.data.slice(0,7);
+    if (!map[k]) map[k] = { mesAno: k, aporte: 0, resgate: 0, rendimento: 0 };
+    map[k][i.op] += i.valor;
+  });
+  const rows = Object.values(map).sort((a,b) => b.mesAno.localeCompare(a.mesAno));
+
+  el.innerHTML = !rows.length
+    ? `<tr><td colspan="5" style="text-align:center;padding:1.25rem;color:var(--muted);font-size:13px">Nenhum lançamento cadastrado</td></tr>`
+    : rows.map(r => {
+      const variacao = r.aporte - r.resgate + r.rendimento;
+      return `
+      <tr style="cursor:pointer" onclick="filterInvByMes('${r.mesAno}')" title="Filtrar por ${mesAnoLabel(r.mesAno)}">
+        <td style="font-weight:500">${mesAnoLabel(r.mesAno)}</td>
+        <td>${fmtVal(r.aporte)}</td>
+        <td style="color:var(--muted)">${fmtVal(r.resgate)}</td>
+        <td style="color:var(--green)">${fmtVal(r.rendimento)}</td>
+        <td style="font-weight:500;color:${variacao >= 0 ? 'var(--blue)' : 'var(--red)'}">${fmtVal(variacao)}</td>
+      </tr>`;
+    }).join('');
+
+  updateInvMesFilter(rows.map(r => r.mesAno));
+  renderInvCarteira();
+}
+
+function filterInvByMes(mesAno) {
+  const sel = document.getElementById('inv-filter-mes');
+  if (!sel) return;
+  sel.value = sel.value === mesAno ? '' : mesAno;
+  updateInvMetrics();
+  renderInvestimentos();
+}
+
+function updateInvMesFilter(meses) {
+  const sel = document.getElementById('inv-filter-mes');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Todos os meses</option>' +
+    meses.map(m => `<option value="${m}">${mesAnoLabel(m)}</option>`).join('');
+  if (current && meses.includes(current)) sel.value = current;
+}
+
+function sortInvBy(col) {
+  if (invSort.col === col) {
+    invSort.dir = cycleDir(invSort.dir);
+    if (invSort.dir === null) invSort.col = null;
+  } else { invSort.col = col; invSort.dir = 'asc'; }
+  renderInvestimentos();
+}
+
+function invGetter(i, col) {
+  if (col === 'data')  return i.data;
+  if (col === 'desc')  return i.desc.toLowerCase();
+  if (col === 'tipo')  return i.tipo;
+  if (col === 'op')    return i.op;
+  if (col === 'valor') return i.valor;
+  return '';
+}
+
+function thInv(col, label) {
+  const active = invSort.col === col;
+  const icon   = !active ? '↕' : invSort.dir === 'asc' ? '↑' : '↓';
+  return `<th style="cursor:pointer;user-select:none;${active?'color:var(--accent-text);':''}" onclick="sortInvBy('${col}')">${label} <span style="font-size:10px;opacity:${active?1:0.4}">${icon}</span></th>`;
+}
+
+function renderInvestimentos() {
+  const searchEl = document.getElementById('inv-search');
+  if (!searchEl) return;
+
+  const q    = (searchEl.value || '').toLowerCase();
+  const tipo = document.getElementById('inv-filter-tipo').value;
+  const op   = document.getElementById('inv-filter-op').value;
+  const mes  = document.getElementById('inv-filter-mes').value;
+
+  let list = investimentos.filter(i => {
+    if (q    && !i.desc.toLowerCase().includes(q)) return false;
+    if (tipo && i.tipo !== tipo)                   return false;
+    if (op   && i.op !== op)                       return false;
+    if (mes  && i.data.slice(0,7) !== mes)         return false;
+    return true;
+  });
+
+  list = invSort.col && invSort.dir
+    ? sortData(list, invSort.col, invSort.dir, invGetter)
+    : [...list].sort((a,b) => b.data.localeCompare(a.data));
+
+  document.getElementById('inv-head').innerHTML =
+    thInv('data','Data') + thInv('desc','Investimento') + thInv('tipo','Tipo') +
+    thInv('op','Operação') + thInv('valor','Valor') + '<th style="width:80px"></th>';
+
+  const body = document.getElementById('inv-body');
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state">
+      <div class="empty-icon">${investimentos.length?'🔍':'📈'}</div>
+      <div class="empty-title">${investimentos.length?'Nenhum resultado':'Nenhum investimento cadastrado'}</div>
+      <div class="empty-sub">${investimentos.length?'Tente outros filtros':'Use o formulário acima para lançar aportes, resgates e rendimentos'}</div>
+    </div></td></tr>`;
+    return;
+  }
+
+  body.innerHTML = list.map(i => {
+    const o = INV_OPS[i.op];
+    return `
+    <tr>
+      <td style="white-space:nowrap;color:var(--muted);font-size:12px">${isoToBR(i.data)}</td>
+      <td>${i.desc}</td>
+      <td style="color:var(--muted);font-size:12px;white-space:nowrap">${INV_TIPO_LABELS[i.tipo]||i.tipo}</td>
+      <td><span class="badge ${o.badge}">${o.label}</span></td>
+      <td style="font-weight:500;white-space:nowrap;color:${i.op === 'resgate' ? 'var(--amber)' : i.op === 'rendimento' ? 'var(--green)' : 'var(--text)'}">${o.sinal < 0 ? '− ' : ''}${fmtVal(i.valor)}</td>
+      <td style="text-align:center;white-space:nowrap">
+        ${editBtn('editInvestimento', i.id)}
+        <button class="btn-delete" onclick="deleteInvestimento(${i.id})" title="Excluir">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function exportInvestimentosJSON() {
+  if (!investimentos.length) { showToast('Nenhum investimento para exportar','warn',3000); return; }
+  const blob = new Blob([JSON.stringify(investimentos, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'investimentos_sicredi.json';
+  a.click();
+}
+
+function importInvestimentosClick() {
+  document.getElementById('inv-import-file').click();
+}
+
+function importInvestimentosJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) { showToast('JSON inválido — esperado um array','warn',4000); return; }
+      const existing = new Set(investimentos.map(x => x.id));
+      let added = 0;
+      data.forEach(item => {
+        if (item.id && item.desc && item.tipo && INV_OPS[item.op] && item.valor && item.data) {
+          if (!existing.has(item.id)) { investimentos.push(item); added++; }
+        }
+      });
+      saveAll();
+      updateInvMetrics();
+      renderInvMensal();
+      renderInvestimentos();
+      showToast(`${added} lançamento(s) importado(s) ✓`, 'ok', 3000);
     } catch (_) {
       showToast('Erro ao ler o arquivo JSON', 'warn', 4000);
     }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sicredi Faturas</title>
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
 </head>
 <body>
 
@@ -32,6 +32,7 @@
     <button class="nav-btn"        onclick="switchTab('entradas',this)">Entradas</button>
     <button class="nav-btn"        onclick="switchTab('futuras',this)">Entradas Futuras</button>
     <button class="nav-btn"        onclick="switchTab('saidas',this)">Saídas</button>
+    <button class="nav-btn"        onclick="switchTab('investimentos',this)">Investimentos</button>
     <button class="nav-btn"        onclick="switchTab('transacoes',this)">Transações</button>
     <button class="nav-btn"        onclick="switchTab('parcelamentos',this)">Parcelamentos</button>
     <button class="nav-btn"        onclick="switchTab('faturas',this)">Histórico</button>
@@ -635,6 +636,174 @@
     </div>
     <!-- /TAB SAÍDAS -->
 
+    <!-- ======== TAB: INVESTIMENTOS ======== -->
+    <div id="tab-investimentos" class="tab">
+
+      <!-- SUMMARY METRICS -->
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label" id="inv-patrimonio-label">Patrimônio investido</div>
+          <div class="metric-value blue" id="inv-patrimonio">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Aportes</div>
+          <div class="metric-value" id="inv-aportes">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Resgates</div>
+          <div class="metric-value amber" id="inv-resgates">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Rendimentos</div>
+          <div class="metric-value green" id="inv-rendimentos">R$ 0,00</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Rentabilidade sobre o aportado</div>
+          <div class="metric-value green" id="inv-rentab">—</div>
+        </div>
+      </div>
+
+      <!-- FORM -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="sec-title" style="margin-bottom:12px">Novo lançamento de investimento</div>
+        <div class="entrada-form inv-form">
+          <div class="form-group">
+            <label class="form-label">Investimento</label>
+            <input type="text" class="pill form-input" id="inv-desc" placeholder="Ex: CDB Sicredi, Tesouro Selic 2029…" list="inv-ativos" onchange="invSugerirTipo()">
+            <datalist id="inv-ativos"></datalist>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tipo</label>
+            <select class="pill form-input" id="inv-tipo">
+              <option value="renda_fixa">CDB / LCI / LCA</option>
+              <option value="tesouro">Tesouro Direto</option>
+              <option value="poupanca">Poupança</option>
+              <option value="acoes">Ações</option>
+              <option value="fiis">Fundos imobiliários (FIIs)</option>
+              <option value="fundos">Fundos de investimento</option>
+              <option value="cripto">Criptomoedas</option>
+              <option value="previdencia">Previdência</option>
+              <option value="outros">Outros</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Operação</label>
+            <select class="pill form-input" id="inv-op">
+              <option value="aporte">Aporte</option>
+              <option value="resgate">Resgate</option>
+              <option value="rendimento">Rendimento</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Valor (R$)</label>
+            <input type="text" class="pill form-input" id="inv-valor" placeholder="0,00" oninput="maskCurrency(this)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data</label>
+            <input type="date" class="pill form-input" id="inv-data">
+          </div>
+          <div class="form-group form-actions">
+            <button class="btn btn-primary" id="inv-submit" onclick="addInvestimento()">Adicionar</button>
+            <button class="btn" id="inv-cancel" onclick="cancelEdit('inv')" style="display:none">Cancelar</button>
+          </div>
+        </div>
+        <div id="inv-error" class="form-error" style="display:none"></div>
+      </div>
+
+      <!-- CARTEIRA -->
+      <div style="margin-bottom:1rem">
+        <div class="sec-title">Carteira <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--hint)">(saldo de cada investimento = aportes − resgates + rendimentos)</span></div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="table-wrap">
+            <table class="inv-carteira">
+              <thead>
+                <tr>
+                  <th>Investimento</th>
+                  <th>Tipo</th>
+                  <th>Aportado</th>
+                  <th>Resgatado</th>
+                  <th>Rendimentos</th>
+                  <th>Saldo</th>
+                  <th>% da carteira</th>
+                </tr>
+              </thead>
+              <tbody id="inv-carteira-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- FILTER + ACTIONS -->
+      <div class="filter-row">
+        <input type="text" class="pill" placeholder="Buscar investimento…" id="inv-search" oninput="renderInvestimentos()">
+        <select class="pill" id="inv-filter-mes" onchange="updateInvMetrics();renderInvestimentos()">
+          <option value="">Todos os meses</option>
+        </select>
+        <select class="pill" id="inv-filter-tipo" onchange="renderInvestimentos()">
+          <option value="">Todos os tipos</option>
+          <option value="renda_fixa">CDB / LCI / LCA</option>
+          <option value="tesouro">Tesouro Direto</option>
+          <option value="poupanca">Poupança</option>
+          <option value="acoes">Ações</option>
+          <option value="fiis">Fundos imobiliários (FIIs)</option>
+          <option value="fundos">Fundos de investimento</option>
+          <option value="cripto">Criptomoedas</option>
+          <option value="previdencia">Previdência</option>
+          <option value="outros">Outros</option>
+        </select>
+        <select class="pill" id="inv-filter-op" onchange="renderInvestimentos()">
+          <option value="">Todas as operações</option>
+          <option value="aporte">Aportes</option>
+          <option value="resgate">Resgates</option>
+          <option value="rendimento">Rendimentos</option>
+        </select>
+        <button class="btn" onclick="exportInvestimentosJSON()">Exportar JSON ↗</button>
+        <button class="btn" onclick="importInvestimentosClick()">Importar JSON ↗</button>
+        <input type="file" id="inv-import-file" class="upload-input" accept=".json" onchange="importInvestimentosJSON(event)">
+      </div>
+
+      <!-- MONTHLY SUMMARY -->
+      <div style="margin-bottom:1rem">
+        <div class="sec-title">Resumo por mês <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px;color:var(--hint)">(clique em uma linha para filtrar)</span></div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Mês</th>
+                  <th>Aportes</th>
+                  <th>Resgates</th>
+                  <th>Rendimentos</th>
+                  <th>Variação no mês</th>
+                </tr>
+              </thead>
+              <tbody id="inv-mensal-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TABLE -->
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="inv-head"></tr>
+            </thead>
+            <tbody id="inv-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="hint-text">
+        Lance cada movimentação: <b>Aporte</b> quando colocar dinheiro, <b>Resgate</b> quando tirar e
+        <b>Rendimento</b> para registrar quanto rendeu (ex: o rendimento do mês mostrado no app do banco).
+        O saldo de cada investimento é calculado somando esses lançamentos.
+      </div>
+
+    </div>
+    <!-- /TAB INVESTIMENTOS -->
+
     <!-- ======== TAB: TRANSAÇÕES ======== -->
     <div id="tab-transacoes" class="tab">
 
@@ -771,7 +940,7 @@
 </div>
 <!-- /app-shell -->
 
-<script src="app.js?v=8"></script>
-<script src="dashboard.js?v=8"></script>
+<script src="app.js?v=9"></script>
+<script src="dashboard.js?v=9"></script>
 </body>
 </html>

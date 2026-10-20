@@ -480,6 +480,11 @@ tr.quitado td    { opacity: .5; }
 .form-input { width: 100%; }
 .form-actions { display: flex; align-items: flex-end; gap: 6px; }
 
+/* Investimentos: formulário com um campo a mais (operação) */
+.inv-form { grid-template-columns: 2fr 1.3fr 1fr 1fr 1fr auto; }
+.inv-carteira td, .inv-carteira th { white-space: nowrap; }
+.inv-carteira tfoot td { font-weight: 600; border-top: 0.5px solid var(--border2); }
+
 /* Repetir entradas de outro mês */
 .rep-meses { display: grid; grid-template-columns: minmax(0, 200px) auto minmax(0, 200px); gap: 10px; align-items: end; }
 .rep-swap { min-height: 38px; white-space: nowrap; }
