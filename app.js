@@ -8,6 +8,7 @@ const IGNORE_PATTERNS = [
   /pag\s*fat/i,
   /pagamento\s*fatura/i,
   /pag\s*deb\s*cc/i,
+  /^pagamento\s+\d+$/i,   // PDF Sicredi X: "Pagamento 031050631"
 ];
 
 function isPagFatura(desc) {
@@ -253,9 +254,197 @@ function handleFile(e) {
 }
 
 function readFile(file) {
+  if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+    parsePDF(file).catch(err => {
+      console.error(err);
+      showToast('Não foi possível ler o PDF: ' + err.message, 'warn', 5000);
+    });
+    return;
+  }
   const rd = new FileReader();
   rd.onload = e => parseCSV(e.target.result, file.name);
   rd.readAsText(file, 'latin1');
+}
+
+// ---------- PARSE PDF (Sicredi X) ----------
+// O app Sicredi X só exporta a fatura em PDF. O texto é extraído com pdf.js
+// (carregado sob demanda) e as transações são lidas pela posição das colunas
+// na tabela "Transações": Data e hora | Cidade | Compra | Descrição | Parcela | ... | Valor em reais.
+
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+const MES_ABREV = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+
+let _pdfjsLoading = null;
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (!_pdfjsLoading) {
+    _pdfjsLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_URL + 'pdf.min.js';
+      s.onload  = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_URL + 'pdf.worker.min.js';
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = () => { _pdfjsLoading = null; reject(new Error('sem conexão para carregar o leitor de PDF')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _pdfjsLoading;
+}
+
+// Agrupa os textos de cada página em linhas (mesma altura), da mais alta para a mais baixa.
+async function pdfRows(file) {
+  const pdfjs = await loadPdfJs();
+  const pdf   = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pages = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const tc    = await (await pdf.getPage(p)).getTextContent();
+    const items = tc.items
+      .filter(it => it.str.trim())
+      .map(it => ({ x: it.transform[4], y: it.transform[5], s: it.str.trim() }))
+      .sort((a, b) => b.y - a.y || a.x - b.x);
+    const rows = [];
+    for (const it of items) {
+      const row = rows[rows.length - 1];
+      if (row && Math.abs(row.y - it.y) <= 2) row.items.push(it);
+      else rows.push({ y: it.y, items: [it] });
+    }
+    rows.forEach(r => {
+      r.items.sort((a, b) => a.x - b.x);
+      r.text = r.items.map(i => i.s).join(' ');
+    });
+    pages.push(rows);
+  }
+  return pages;
+}
+
+function brlToNumber(str) {
+  return parseFloat(str.replace(/R\$\s*/, '').replace(/\./g, '').replace(',', '.')) || 0;
+}
+
+async function parsePDF(file) {
+  showToast('Lendo PDF…', 'info', 0);
+  const pages   = await pdfRows(file);
+  const allText = pages.map(rows => rows.map(r => r.text).join('\n')).join('\n');
+  const logs    = [];
+
+  const vencStr = (allText.match(/Vencimento\s+(\d{2}\/\d{2}\/\d{4})/) || [])[1] || '';
+  const totalM  = allText.match(/Total fatura de\s+([a-zç]+)\s+(R\$\s*[\d.,]+)/i);
+  const totalStr = totalM ? totalM[2] : '';
+  if (!vencStr) throw new Error('não parece ser uma fatura do Sicredi (vencimento não encontrado)');
+
+  const [, vMes, vAno] = vencStr.split('/').map(Number);
+  const mesNome  = totalM ? totalM[1][0].toUpperCase() + totalM[1].slice(1).toLowerCase() : MES_LABELS[vMes - 1];
+  // Id pelo mês da fatura (e não pelo nome do arquivo) para que baixar e
+  // importar o mesmo PDF de novo não duplique as transações.
+  const filename = `${mesNome} ${vAno}`;
+
+  const assocRow = pages.flat().find(r => /Vencimento\s+\d{2}\/\d{2}\/\d{4}/.test(r.text));
+  const meta = {
+    'Associado':      assocRow ? assocRow.items[0].s : '—',
+    'Conta Corrente': '—',
+  };
+
+  const tx = [];
+  const uidCount  = {};
+  let titular     = null;  // final do cartão principal (primeiro listado)
+  let cartao      = '';
+  let ignored     = 0;
+  const totaisCartao = {};
+
+  for (const rows of pages) {
+    let inTable = false;
+    const pageTx = [];
+    const orphans = [];  // pedaços de descrição em linha própria (ex: "Anuidade Diferenc 11/12")
+
+    for (const r of rows) {
+      const t = r.text;
+      // Linha "Cartão <nome> (final 1234)" vem logo acima do cabeçalho da tabela.
+      const cm = t.match(/^Cartão.*final\s*(\d{4})/);
+      if (cm) {
+        cartao = cm[1];
+        if (!titular) { titular = cartao; meta['Conta Corrente'] = `Cartão final ${titular}`; }
+        continue;
+      }
+      if (/^Data e hora/.test(t)) { inTable = true; continue; }
+      if (/^Legenda/.test(t))     { inTable = false; continue; }
+      if (!inTable) continue;
+      // "Total cartão" se repete em cada página do mesmo cartão — guarda um por cartão.
+      if (/^Total cartão/.test(t)) {
+        const vm = t.match(/R\$\s*[\d.,]+/);
+        if (vm) totaisCartao[cartao] = brlToNumber(vm[0]);
+        continue;
+      }
+      if (/^R\$\s*[\d.,]+$/.test(t) && r.items[0].x > 450) { totaisCartao[cartao] = brlToNumber(t); continue; }
+
+      const dm = t.match(/^(\d{2})\/\s*([a-zç]{3})\s+(\d{2}:\d{2})/i);
+      const descParts = r.items.filter(i => i.x >= 230 && i.x < 345).map(i => i.s);
+      if (!dm) {
+        if (descParts.length) orphans.push({ y: r.y, s: descParts.join(' ') });
+        continue;
+      }
+
+      const mes   = MES_ABREV.indexOf(dm[2].toLowerCase()) + 1;
+      const ano   = mes > vMes ? vAno - 1 : vAno;
+      const valIt = r.items.find(i => i.x >= 450 && /R\$/.test(i.s));
+      if (!mes || !valIt) continue;
+      const neg   = r.items.some(i => i.x >= 450 && i.s.trim().startsWith('-'));
+      const parIt = r.items.find(i => i.x >= 345 && i.x < 390 && /^\d+\/\d+$/.test(i.s));
+
+      pageTx.push({
+        y: r.y, hora: dm[3],
+        data: `${dm[1]}/${String(mes).padStart(2, '0')}/${ano}`,
+        descParts: [{ y: r.y, s: descParts.join(' ') }],
+        parcelaRaw: parIt ? parIt.s : '',
+        valor: (neg ? -1 : 1) * brlToNumber(valIt.s),
+        adicional: cartao && cartao !== titular ? cartao : '',
+      });
+    }
+
+    // Junta cada pedaço de descrição solto à transação mais próxima (até 12pt de distância).
+    for (const o of orphans) {
+      let best = null;
+      for (const p of pageTx) if (!best || Math.abs(p.y - o.y) < Math.abs(best.y - o.y)) best = p;
+      if (best && Math.abs(best.y - o.y) <= 12) best.descParts.push(o);
+    }
+
+    for (const p of pageTx) {
+      const desc = p.descParts.sort((a, b) => b.y - a.y).map(d => d.s).filter(Boolean).join(' ').trim();
+      if (isPagFatura(desc)) { ignored++; continue; }
+
+      const pm = p.parcelaRaw.match(/^(\d+)\/(\d+)$/);
+      const parcela = pm ? { atual: parseInt(pm[1]), total: parseInt(pm[2]) } : null;
+
+      const baseUid = [p.data, p.hora, desc, p.parcelaRaw, filename].join('||');
+      uidCount[baseUid] = (uidCount[baseUid] || 0) + 1;
+      const uid = uidCount[baseUid] > 1 ? `${baseUid}||${uidCount[baseUid]}` : baseUid;
+
+      tx.push({ uid, data: p.data, desc, parcela, valor: p.valor, adicional: p.adicional,
+                tipo: p.valor < 0 ? 'credito' : 'debito', faturaId: filename });
+    }
+  }
+
+  hideToast();
+  if (!tx.length) throw new Error('nenhuma transação encontrada no PDF');
+
+  logs.push({ t: 'info', m: `Associado: ${meta['Associado']}` });
+  logs.push({ t: 'info', m: `Vencimento: ${vencStr} | Total: ${totalStr}` });
+  logs.push({ t: 'ok',   m: `${tx.length} transações lidas do PDF (${ignored} pagamentos de fatura ignorados)` });
+  logs.push({ t: 'ok',   m: `Parcelamentos: ${tx.filter(t => t.parcela).length} | Créditos: ${tx.filter(t => t.tipo === 'credito').length}` });
+
+  // Conferência: a soma das compras deve bater com os "Total cartão" do PDF.
+  const somaDebitos  = tx.filter(t => t.valor > 0).reduce((s, t) => s + t.valor, 0);
+  const totalCartoes = Object.values(totaisCartao).reduce((s, v) => s + v, 0);
+  if (totalCartoes) {
+    const bate = Math.abs(somaDebitos - totalCartoes) < 0.01;
+    logs.push({ t: bate ? 'ok' : 'warn',
+      m: bate ? `Conferido: compras somam ${fmtVal(somaDebitos)}, igual ao total dos cartões no PDF`
+              : `Atenção: compras somam ${fmtVal(somaDebitos)}, mas o PDF informa ${fmtVal(totalCartoes)} — confira a lista` });
+  }
+
+  // O PDF só é emitido depois do fechamento, então a fatura já está fechada.
+  pending = { tx, meta, vencStr, totalStr, situacao: 'Fechada', filename, logs };
+  showPreview();
 }
 
 // ---------- PARSE CSV ----------

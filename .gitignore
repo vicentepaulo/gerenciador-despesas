@@ -1,3 +1,6 @@
 dados/
 node_modules/
 .claude/
+*.pdf
+*.csv
+faturas/

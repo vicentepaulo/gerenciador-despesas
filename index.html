@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sicredi Faturas</title>
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -27,7 +27,7 @@
 
   <!-- NAV -->
   <div class="nav" id="nav-menu">
-    <button class="nav-btn active" onclick="switchTab('import',this)">Importar CSV</button>
+    <button class="nav-btn active" onclick="switchTab('import',this)">Importar fatura</button>
     <button class="nav-btn"        onclick="switchTab('entradas',this)">Entradas</button>
     <button class="nav-btn"        onclick="switchTab('futuras',this)">Entradas Futuras</button>
     <button class="nav-btn"        onclick="switchTab('saidas',this)">Saídas</button>
@@ -49,12 +49,12 @@
            ondragleave="ev(event,false)"
            ondrop="drop(event)">
         <div class="u-icon">📄</div>
-        <div class="u-title">Arraste o CSV do Sicredi ou clique para selecionar</div>
+        <div class="u-title">Arraste o PDF da fatura do Sicredi ou clique para selecionar</div>
         <div class="u-sub">
-          Formato: <b>Data · Descrição · Parcela · Valor · Valor em Dólar · Adicional · Nome</b>
+          Aceita o <b>PDF da fatura do app Sicredi X</b> ou o <b>CSV</b> exportado pelo app antigo
         </div>
       </div>
-      <input type="file" id="finput" class="upload-input" accept=".csv,.txt" onchange="handleFile(event)">
+      <input type="file" id="finput" class="upload-input" accept=".pdf,.csv,.txt,application/pdf" onchange="handleFile(event)">
 
       <!-- PREVIEW -->
       <div id="preview-block" style="display:none; margin-top:1rem">
@@ -97,11 +97,11 @@
 
       <!-- GUIDE -->
       <div style="margin-top:1.25rem">
-        <div class="sec-title">Como exportar o CSV no Sicredi</div>
+        <div class="sec-title">Como baixar a fatura no Sicredi X</div>
         <div class="card" style="padding:.75rem 1rem">
           <div class="guide-step">
             <div class="step-num">1</div>
-            <div class="step-txt">Acesse o app ou internet banking do Sicredi</div>
+            <div class="step-txt">Abra o app <span style="color:var(--accent-text); font-weight:500">Sicredi X</span></div>
           </div>
           <div class="guide-step">
             <div class="step-num">2</div>
@@ -112,14 +112,14 @@
           <div class="guide-step">
             <div class="step-num">3</div>
             <div class="step-txt">
-              Selecione a fatura e toque em
-              <span style="color:var(--accent-text); font-weight:500">Exportar / Baixar extrato</span>
+              Abra a fatura do mês e toque na opção de
+              <span style="color:var(--accent-text); font-weight:500">baixar / compartilhar o PDF</span>
             </div>
           </div>
           <div class="guide-step">
             <div class="step-num">4</div>
             <div class="step-txt">
-              Escolha o formato <span style="color:var(--accent-text); font-weight:500">CSV</span> e salve
+              Salve o <span style="color:var(--accent-text); font-weight:500">PDF</span> e selecione o arquivo aqui em cima
             </div>
           </div>
         </div>
@@ -656,7 +656,7 @@
         <div class="empty-state">
           <div class="empty-icon">🧾</div>
           <div class="empty-title">Nenhuma fatura importada</div>
-          <div class="empty-sub">Importe seus CSVs para ver o histórico aqui</div>
+          <div class="empty-sub">Importe suas faturas para ver o histórico aqui</div>
         </div>
       </div>
     </div>
@@ -668,6 +668,6 @@
 </div>
 <!-- /app-shell -->
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
