@@ -197,6 +197,7 @@ function applyTheme(t, fromLoad) {
   if (btnDark)  btnDark.classList.toggle('on',  theme === 'dark');
   try { localStorage.setItem('sicredi_theme', theme); } catch (_) {}
   if (fromLoad) return; // não reagenda salvamento durante o carregamento inicial
+  if (typeof renderDashboard === 'function') renderDashboard(); // cores dos gráficos seguem o tema
 }
 
 // Chamado pelos botões Claro/Escuro — aplica e persiste no localStorage.
@@ -228,6 +229,7 @@ function switchTab(name, btn) {
   if (name === 'transacoes')    renderTx();
   if (name === 'parcelamentos') renderInstall();
   if (name === 'faturas')       renderFaturas();
+  if (name === 'dashboard')     renderDashboard();
 }
 
 function toggleMobileMenu() {

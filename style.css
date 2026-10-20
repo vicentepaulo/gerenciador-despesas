@@ -570,6 +570,74 @@ tr.quitado td    { opacity: .5; }
 .toast-warn { background: var(--amber-bg); color: var(--amber-text); border-color: var(--amber-text); }
 .toast-info { background: var(--blue-bg);  color: var(--blue-text);  border-color: var(--blue-text); }
 
+/* ---------- DASHBOARD ---------- */
+/* Cores das séries (validadas para daltonismo contra o fundo dos cards):
+   entradas = azul, saídas = laranja, saldo = verde-água. */
+:root {
+  --viz-ent:   #2a78d6;
+  --viz-sai:   #eb6834;
+  --viz-saldo: #1baf7a;
+  --viz-grid:  #eceef3;
+  --viz-axis:  #c8ccd8;
+}
+.dark {
+  --viz-ent:   #3987e5;
+  --viz-sai:   #d95926;
+  --viz-saldo: #199e70;
+  --viz-grid:  #232b3e;
+  --viz-axis:  #364060;
+}
+
+.dash-filters { align-items: center; }
+.dash-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.dash-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 8px 6px 12px; min-height: 34px;
+  border-radius: 999px; border: 0.5px solid var(--border2);
+  background: var(--bg1); color: var(--text);
+  font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.dash-chip b { font-weight: 600; }
+.dash-chip .x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--bg2); color: var(--muted); font-size: 11px;
+}
+.dash-chip:hover .x { background: var(--red-bg); color: var(--red-text); }
+
+.dash-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.dash-kpi-delta { font-size: 11px; margin-top: 4px; color: var(--muted); white-space: nowrap; }
+.dash-kpi-delta.bom  { color: var(--green-text); }
+.dash-kpi-delta.ruim { color: var(--red-text); }
+
+.dash-insights ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.dash-insights li {
+  font-size: 13px; line-height: 1.45; color: var(--text);
+  padding-left: 22px; position: relative;
+}
+.dash-insights li::before { position: absolute; left: 0; top: 0; content: attr(data-icon); }
+
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dash-wide { grid-column: 1 / -1; }
+.dash-card { min-width: 0; }
+.dash-card-head { margin-bottom: 10px; }
+.dash-card-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.dash-card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.dash-chart { position: relative; width: 100%; }
+.dash-note { font-size: 12px; color: var(--muted); padding: 1.5rem 0; text-align: center; }
+.dash-msg { font-size: 12px; color: var(--muted); padding: 2rem 0; text-align: center; }
+
+.dash-table td, .dash-table th { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dash-table td:not(:first-child), .dash-table th:not(:first-child) { text-align: right; }
+.dash-table tbody tr { cursor: pointer; }
+.dash-table tbody tr.sel td { background: var(--accent-dim); }
+.dash-table .pos { color: var(--green-text); }
+.dash-table .neg { color: var(--red-text); }
+
+@media (max-width: 900px) {
+  .dash-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ============================================
    MOBILE — tela estreita (≤ 640px)
    ============================================ */

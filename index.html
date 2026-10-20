@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sicredi Faturas</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -27,7 +27,8 @@
 
   <!-- NAV -->
   <div class="nav" id="nav-menu">
-    <button class="nav-btn active" onclick="switchTab('import',this)">Importar fatura</button>
+    <button class="nav-btn active" onclick="switchTab('dashboard',this)">Dashboard</button>
+    <button class="nav-btn"        onclick="switchTab('import',this)">Importar fatura</button>
     <button class="nav-btn"        onclick="switchTab('entradas',this)">Entradas</button>
     <button class="nav-btn"        onclick="switchTab('futuras',this)">Entradas Futuras</button>
     <button class="nav-btn"        onclick="switchTab('saidas',this)">Saídas</button>
@@ -40,7 +41,107 @@
   <div class="content">
 
     <!-- ======== TAB: IMPORTAR ======== -->
-    <div id="tab-import" class="tab active">
+    <!-- ======== TAB: DASHBOARD ======== -->
+    <div id="tab-dashboard" class="tab active">
+
+      <!-- FILTROS (valem para todo o painel) -->
+      <div class="filter-row dash-filters">
+        <select class="pill" id="dash-periodo" onchange="dashSetPeriodo(this.value)" aria-label="Período">
+          <option value="3">Últimos 3 meses</option>
+          <option value="6" selected>Últimos 6 meses</option>
+          <option value="12">Últimos 12 meses</option>
+          <option value="ano">Este ano</option>
+          <option value="tudo">Todo o período</option>
+        </select>
+        <div class="dash-chips" id="dash-chips"></div>
+      </div>
+
+      <div id="dash-empty" class="card" style="display:none">
+        <div class="empty-state">
+          <div class="empty-icon">📊</div>
+          <div class="empty-title">Ainda não há dados para o painel</div>
+          <div class="empty-sub">Cadastre entradas e saídas ou importe uma fatura do cartão</div>
+        </div>
+      </div>
+
+      <div id="dash-body">
+        <div class="metrics dash-kpis" id="dash-kpis"></div>
+
+        <div class="card dash-insights" style="margin-bottom:1rem">
+          <div class="sec-title" style="margin-bottom:8px">Insights</div>
+          <ul id="dash-insights"></ul>
+        </div>
+
+        <div class="dash-grid">
+          <div class="card dash-card dash-wide">
+            <div class="dash-card-head">
+              <div class="dash-card-title">Entradas × saídas por mês</div>
+              <div class="dash-card-sub">Toque em um mês para filtrar o painel inteiro</div>
+            </div>
+            <div class="dash-chart" style="height:290px"><canvas id="dash-c-mensal" role="img" aria-label="Entradas, saídas e resultado por mês"></canvas></div>
+          </div>
+
+          <div class="card dash-card">
+            <div class="dash-card-head">
+              <div class="dash-card-title">Para onde vai o dinheiro</div>
+              <div class="dash-card-sub">Saídas por categoria · toque para filtrar</div>
+            </div>
+            <div class="dash-chart" id="dash-h-cat"><canvas id="dash-c-cat" role="img" aria-label="Saídas por categoria"></canvas></div>
+          </div>
+
+          <div class="card dash-card">
+            <div class="dash-card-head">
+              <div class="dash-card-title">De onde vem o dinheiro</div>
+              <div class="dash-card-sub">Entradas por tipo</div>
+            </div>
+            <div class="dash-chart" id="dash-h-ent"><canvas id="dash-c-ent" role="img" aria-label="Entradas por tipo"></canvas></div>
+          </div>
+
+          <div class="card dash-card">
+            <div class="dash-card-head">
+              <div class="dash-card-title">Saldo acumulado</div>
+              <div class="dash-card-sub">Quanto sobrou somando mês a mês no período</div>
+            </div>
+            <div class="dash-chart" style="height:240px"><canvas id="dash-c-acum" role="img" aria-label="Saldo acumulado no período"></canvas></div>
+          </div>
+
+          <div class="card dash-card">
+            <div class="dash-card-head">
+              <div class="dash-card-title">Onde mais gastou no cartão</div>
+              <div class="dash-card-sub">Estabelecimentos com maior valor somado</div>
+            </div>
+            <div class="dash-chart" id="dash-h-top"><canvas id="dash-c-top" role="img" aria-label="Estabelecimentos com maior gasto no cartão"></canvas></div>
+            <div class="dash-note" id="dash-top-note" style="display:none"></div>
+          </div>
+
+          <div class="card dash-card dash-wide">
+            <div class="dash-card-head">
+              <div class="dash-card-title">Próximos meses</div>
+              <div class="dash-card-sub">Entradas previstas × parcelas do cartão já comprometidas · não muda com os filtros</div>
+            </div>
+            <div class="dash-chart" style="height:240px"><canvas id="dash-c-prev" role="img" aria-label="Entradas previstas e parcelas a pagar nos próximos meses"></canvas></div>
+          </div>
+
+          <div class="card dash-card dash-wide" style="padding:0;overflow:hidden">
+            <div class="dash-card-head" style="padding:1rem 1rem 0">
+              <div class="dash-card-title">Resumo mensal</div>
+              <div class="dash-card-sub">Os mesmos números dos gráficos · toque em uma linha para filtrar</div>
+            </div>
+            <div class="table-wrap">
+              <table class="dash-table">
+                <thead>
+                  <tr><th>Mês</th><th>Entradas</th><th>Cartão</th><th>Outras saídas</th><th>Resultado</th><th>Acumulado</th></tr>
+                </thead>
+                <tbody id="dash-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- /TAB DASHBOARD -->
+
+    <div id="tab-import" class="tab">
 
       <div class="upload-zone"
            id="dropzone"
@@ -668,6 +769,7 @@
 </div>
 <!-- /app-shell -->
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
+<script src="dashboard.js?v=7"></script>
 </body>
 </html>
